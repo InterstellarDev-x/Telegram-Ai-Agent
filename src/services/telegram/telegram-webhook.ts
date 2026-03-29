@@ -274,7 +274,7 @@ async function buildRawQuestionRequestFromImages(
 
   return {
     question,
-    targetLanguage: "typescript",
+    targetLanguage: "cpp",
     maxAttempts: 4,
     imageAssets,
   };

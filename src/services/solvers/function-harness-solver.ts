@@ -74,6 +74,7 @@ Your job is to decide whether the submitted code correctly solves the coding pro
 Rules:
 - Treat the original problem images as the highest-priority source of truth.
 - Use the reconstructed text problem statement as supporting context.
+- These problems are typically exam-style stdin/stdout tasks and may include starter code, predefined functions, or class signatures in the screenshots.
 - Review the candidate code logically. You do not need to execute it.
 - Be conservative: mark passed=true only if the code clearly solves the shown problem.
 - If the code is wrong, incomplete, or mismatched to the screenshots, mark passed=false.
@@ -299,5 +300,6 @@ Context:
 ${previousFeedback}
 
 Decide whether this code is correct for the coding problem shown in the attached images.
+If the screenshots include starter code, required function/class names, or sample tests, evaluate against those exact requirements.
   `.trim();
 }

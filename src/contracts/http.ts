@@ -28,7 +28,7 @@ export type FunctionHarness = z.infer<typeof functionHarnessSchema>;
 export const streamedSolveRequestSchema = z.object({
   title: z.string().min(1),
   statement: z.string().min(1),
-  targetLanguage: z.enum(supportedLanguages).default("typescript"),
+  targetLanguage: z.enum(supportedLanguages).default("cpp"),
   instructions: z.array(z.string()).default([]),
   maxAttempts: z.number().int().positive().max(10).default(4),
   harness: functionHarnessSchema,
@@ -39,7 +39,7 @@ export type StreamedSolveRequest = z.infer<typeof streamedSolveRequestSchema>;
 
 export const rawQuestionRequestSchema = z.object({
   question: z.string().min(1),
-  targetLanguage: z.enum(supportedLanguages).default("typescript"),
+  targetLanguage: z.enum(supportedLanguages).default("cpp"),
   maxAttempts: z.number().int().positive().max(10).default(4),
   imageAssets: z.array(problemImageAssetSchema).default([]),
 });
@@ -84,11 +84,11 @@ export function buildProblemFromHttpRequest(
     "",
     request.statement,
     "",
-    "Function requirements:",
-    `- Function name: ${request.harness.functionName}`,
-    `- Signature: ${request.harness.functionSignature}`,
-    "- Return only the function implementation.",
-    "- Do not read from stdin or write to stdout.",
+    "Execution requirements:",
+    "- Solve this as an exam-style competitive programming problem.",
+    "- Prefer a complete stdin/stdout program unless the statement clearly requires a specific class or function signature.",
+    "- If starter code, a required function, or a required class appears in the screenshots or statement, preserve it exactly.",
+    "- Use the parsed sample cases as supporting examples, but treat the screenshots and statement as the source of truth.",
     ...request.instructions.map((instruction) => `- ${instruction}`),
   ];
 

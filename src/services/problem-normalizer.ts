@@ -12,7 +12,7 @@ const SAMPLE_BLOCK_PATTERN =
 
 export function buildProblemFromRawText({
   rawText,
-  targetLanguage = "javascript",
+  targetLanguage = "cpp",
   verificationCases = [],
   constraints = [],
 }: BuildProblemInput): CodingProblem {

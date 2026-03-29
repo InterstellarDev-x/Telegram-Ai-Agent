@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const supportedLanguages = ["javascript", "typescript", "python"] as const;
+export const supportedLanguages = ["cpp", "javascript", "typescript", "python"] as const;
 
 export type SupportedLanguage = (typeof supportedLanguages)[number];
 
@@ -30,7 +30,7 @@ export const codingProblemSchema = z.object({
   title: z.string(),
   rawText: z.string(),
   statement: z.string(),
-  targetLanguage: z.enum(supportedLanguages).default("javascript"),
+  targetLanguage: z.enum(supportedLanguages).default("cpp"),
   sampleCases: z.array(problemTestCaseSchema).default([]),
   verificationCases: z.array(problemTestCaseSchema).default([]),
   constraints: z.array(z.string()).default([]),

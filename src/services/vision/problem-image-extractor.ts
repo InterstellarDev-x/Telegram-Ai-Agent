@@ -49,8 +49,10 @@ Return a JSON object with these fields:
 - issues: short reasons if the image is blurry, cropped, obscured, or otherwise hard to read
 
 Rules:
-- Preserve the problem title, statement, examples, input/output blocks, and constraints.
-- Preserve function signatures if they appear.
+- Preserve the problem title, difficulty label, statement, examples, input/output blocks, sample test cases, constraints, and explanations.
+- Preserve any starter code, predefined function signatures, class names, or required method names if they appear.
+- Preserve exact identifiers and structured sections such as "Input Format", "Output Format", "Sample Test Cases", and "Constraints".
+- Normalize broken OCR whitespace only when needed for readability, but do not invent missing sections.
 - Do not explain anything.
 - Do not wrap the result in markdown.
 - If the image contains only part of the question, return the visible text only and set coverage to "partial".

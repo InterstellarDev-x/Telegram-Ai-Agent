@@ -59,7 +59,7 @@ function listToArray(head: ListNode | null): number[] {
 const modelParsedProblemSchema = z.object({
   title: z.string().min(1),
   normalizedStatement: z.string().min(1),
-  targetLanguage: z.enum(["typescript", "javascript", "python"]),
+  targetLanguage: z.enum(["cpp", "typescript", "javascript", "python"]),
   detectedStyle: z.enum(["function", "stdin_stdout", "unknown"]),
   functionName: z.string().nullable(),
   functionSignature: z.string().nullable(),
@@ -141,6 +141,9 @@ You convert raw coding-problem text into deterministic JSON for a later solve pi
 Rules:
 - Return JSON only through the structured schema.
 - Prefer exact extraction from the question text.
+- These inputs are often exam-style screenshots with sections like Input Format, Constraints, Sample Test Cases, and explanations.
+- Preserve any visible starter code, predefined class/function signatures, and required method names in normalizedStatement.
+- Prefer detectedStyle = "stdin_stdout" unless the problem clearly requires a fixed callable signature.
 - If you are not confident enough to build a valid solve request, leave suggestedSolveRequest undefined.
 - When you can infer a function-style problem, build suggestedSolveRequest compatible with the solver API.
 - Do not invent hidden tests.
@@ -294,6 +297,7 @@ You infer the function harness metadata needed to solve a coding problem.
 Rules:
 - Return JSON only through the structured schema.
 - Prefer a function-style harness.
+- These questions may be exam-style stdin/stdout problems without an explicit function signature.
 - If the exact function signature is missing, infer the most likely canonical LeetCode-style signature from the problem title, statement, and examples.
 - Use the example input variable names when building the signature and invoke expression.
 - Return only metadata for a single function implementation requirement, not stdin/stdout.
@@ -343,11 +347,10 @@ ${request.question}
       title: parsed.title,
       statement: parsed.normalizedStatement,
       targetLanguage: request.targetLanguage,
-      instructions: [
-        `The function must be named ${inferred.functionName}.`,
-        `The signature is ${inferred.functionSignature}.`,
-        "Return only the function implementation.",
-        "Do not read from stdin or write to stdout.",
+        instructions: [
+          `The function must be named ${inferred.functionName}.`,
+          `The signature is ${inferred.functionSignature}.`,
+        "If the original problem is exam-style stdin/stdout, the generator may still return a full program; use this harness only as parsed sample structure.",
         ...inferred.instructions,
       ],
       maxAttempts: request.maxAttempts,
@@ -441,8 +444,7 @@ function buildHeuristicSolveRequest(
     instructions: [
       `The function must be named ${functionName}.`,
       `The signature is ${functionSignature}.`,
-      "Return only the function implementation.",
-      "Do not read from stdin or write to stdout.",
+      "If the original problem is exam-style stdin/stdout, treat this harness as parsed sample structure rather than a strict implementation interface.",
       "The function name and signature were inferred deterministically from the title and sample inputs.",
     ],
     maxAttempts: request.maxAttempts,
@@ -515,8 +517,7 @@ function buildRegexFallback(
         instructions: [
           `The function must be named ${functionName}.`,
           `The signature is ${functionSignature}.`,
-          "Return only the function implementation.",
-          "Do not read from stdin or write to stdout.",
+          "If the original problem is exam-style stdin/stdout, treat this harness as sample-case structure rather than a strict implementation interface.",
         ],
         maxAttempts: request.maxAttempts,
         harness: {
@@ -601,8 +602,7 @@ function buildKnownProblemTemplate(
             instructions: [
               "The function must be named mergeKLists.",
               "The signature is function mergeKLists(lists: Array<ListNode | null>): ListNode | null.",
-              "Return only the function implementation.",
-              "Do not read from stdin or write to stdout.",
+              "If the original problem includes starter code, preserve the required interface exactly.",
               "Use the provided ListNode definition from the harness.",
             ],
             maxAttempts: request.maxAttempts,
