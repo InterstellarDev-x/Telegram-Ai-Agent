@@ -1,4 +1,3 @@
-import type { BaseLanguageModel } from "@langchain/core/language_models/base";
 import {
   solutionCandidateSchema,
   type CodeGenerationAgent,
@@ -7,7 +6,7 @@ import {
 } from "../contracts/agents.js";
 import type { Logger } from "../utils/logger.js";
 
-const CODE_GENERATION_SYSTEM_PROMPT = `
+const GEMINI_CODE_GENERATION_SYSTEM_PROMPT = `
 You are the Code Generation Agent in a coding-problem solving backend.
 
 Your job:
@@ -20,17 +19,23 @@ Your job:
 - Pay close attention to constraints and choose an algorithm that fits them.
 - Use all provided sample tests and explanations as consistency checks, but do not hardcode sample outputs.
 - If feedback from previous failed attempts exists, directly address it.
-- Do not include markdown fences.
+- Return raw code only inside the structured JSON response. Do not include markdown fences.
 `;
 
-export class DeepAgentCodeGenerationAgent implements CodeGenerationAgent {
+export class GeminiCodeGenerationAgent implements CodeGenerationAgent {
   readonly role = "code-generator" as const;
   private readonly logger: Logger;
-  private readonly model: BaseLanguageModel;
+  private readonly apiKey: string;
+  private readonly model: string;
 
-  constructor(model: BaseLanguageModel, logger: Logger) {
-    this.model = model;
-    this.logger = logger.child("code-generator");
+  constructor(logger: Logger) {
+    this.logger = logger.child("gemini-code-generator");
+    this.apiKey = process.env.GEMINI_API_KEY?.trim() ?? "";
+    this.model = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+
+    if (!this.apiKey) {
+      throw new Error("GEMINI_API_KEY is required to use Gemini generation.");
+    }
   }
 
   async generate(input: GenerateSolutionInput): Promise<SolutionCandidate> {
@@ -38,26 +43,57 @@ export class DeepAgentCodeGenerationAgent implements CodeGenerationAgent {
       attempt: input.attempt,
       feedbackCount: input.feedbackHistory.length,
       language: input.problem.targetLanguage,
+      provider: "gemini",
+      model: this.model,
     });
 
-    const prompt = buildGenerationPrompt(input);
-    const structured = solutionCandidateSchema.parse(
-      await invokeStructuredModel(
-        this.model,
-        CODE_GENERATION_SYSTEM_PROMPT,
-        prompt,
-        solutionCandidateSchema,
-      ),
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${encodeURIComponent(this.apiKey)}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          contents: [
+            {
+              role: "user",
+              parts: [
+                {
+                  text: `${GEMINI_CODE_GENERATION_SYSTEM_PROMPT.trim()}\n\n${buildGenerationPrompt(
+                    input,
+                  )}`,
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            temperature: 0,
+            response_mime_type: "application/json",
+            response_schema: solutionCandidateResponseSchema,
+          },
+        }),
+      },
     );
+
+    if (!response.ok) {
+      throw new Error(`Gemini generation failed with status ${response.status}.`);
+    }
+
+    const body = (await response.json()) as GeminiGenerateContentResponse;
+    const rawText = extractGeminiText(body).trim();
+    const structured = solutionCandidateSchema.parse(JSON.parse(rawText));
 
     this.logger.info("generation-finished", {
       attempt: input.attempt,
       language: structured.language,
+      provider: "gemini",
+      model: this.model,
     });
 
     return {
       ...structured,
-      provider: "openai",
+      provider: "gemini",
     };
   }
 }
@@ -81,6 +117,7 @@ ${feedback.actionItems.map((item) => `- ${item}`).join("\n")}`,
       : input.previousCandidates
           .map(
             (candidate, index) => `Attempt ${index + 1} code:
+provider: ${candidate.provider ?? "unknown"}
 language: ${candidate.language}
 strategy: ${candidate.strategy}
 code:
@@ -115,28 +152,50 @@ Return structured output with:
 - strategy
 - complexity
 - assumptions
-`;
+  `.trim();
 }
 
-type StructuredAgent = {
-  withStructuredOutput(schema: unknown): {
-    invoke(input: string): Promise<unknown>;
-  };
-};
+const solutionCandidateResponseSchema = {
+  type: "OBJECT",
+  properties: {
+    language: {
+      type: "STRING",
+      enum: ["cpp", "javascript", "typescript", "python"],
+    },
+    code: {
+      type: "STRING",
+    },
+    strategy: {
+      type: "STRING",
+    },
+    complexity: {
+      type: "STRING",
+    },
+    assumptions: {
+      type: "ARRAY",
+      items: {
+        type: "STRING",
+      },
+    },
+  },
+  required: ["language", "code", "strategy", "complexity", "assumptions"],
+  propertyOrdering: ["language", "code", "strategy", "complexity", "assumptions"],
+} as const;
 
-async function invokeStructuredModel(
-  model: BaseLanguageModel,
-  systemPrompt: string,
-  userPrompt: string,
-  schema: typeof solutionCandidateSchema,
-): Promise<unknown> {
-  const structuredModel = model as BaseLanguageModel & StructuredAgent;
-  if (typeof structuredModel.withStructuredOutput !== "function") {
-    throw new Error("Configured model does not support structured output.");
-  }
+interface GeminiGenerateContentResponse {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{
+        text?: string;
+      }>;
+    };
+  }>;
+}
 
-  const runnable = structuredModel.withStructuredOutput(schema);
-  return await runnable.invoke(
-    `${systemPrompt.trim()}\n\n${userPrompt.trim()}`,
+function extractGeminiText(response: GeminiGenerateContentResponse): string {
+  return (
+    response.candidates?.[0]?.content?.parts
+      ?.map((part) => part.text ?? "")
+      .join("") ?? ""
   );
 }

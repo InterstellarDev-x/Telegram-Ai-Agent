@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { DeepAgentCodeGenerationAgent } from "../../agents/deep-code-generation-agent.js";
+import { GeminiCodeGenerationAgent } from "../../agents/gemini-code-generation-agent.js";
+import { MultiCodeGenerationAgent } from "../../agents/multi-code-generation-agent.js";
 import { SupervisorAgent } from "../../agents/supervisor-agent.js";
 import type {
+  CodeGenerationAgent,
   CodeTestingAgent,
   GenerationFeedback,
   TestSolutionInput,
@@ -257,8 +260,15 @@ export async function solveWithFunctionHarness(
     temperature: 0,
   });
 
+  const generators: CodeGenerationAgent[] = [
+    new DeepAgentCodeGenerationAgent(model, logger),
+  ];
+  if (process.env.GEMINI_API_KEY?.trim()) {
+    generators.push(new GeminiCodeGenerationAgent(logger));
+  }
+
   const supervisor = new SupervisorAgent({
-    generator: new DeepAgentCodeGenerationAgent(model, logger),
+    generator: new MultiCodeGenerationAgent(generators, logger.child("multi-generator")),
     tester: new ImageAwareCodeTestingAgent(logger.child("image-aware-tester")),
     transport: new InMemoryAgentTransport(logger.child("transport")),
     logger,

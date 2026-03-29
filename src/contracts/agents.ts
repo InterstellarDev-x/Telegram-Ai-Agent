@@ -11,6 +11,7 @@ export const solutionCandidateSchema = z.object({
   strategy: z.string().min(1),
   complexity: z.string().min(1),
   assumptions: z.array(z.string()).default([]),
+  provider: z.enum(["openai", "gemini"]).optional(),
 });
 
 export type SolutionCandidate = z.infer<typeof solutionCandidateSchema>;
@@ -114,6 +115,7 @@ export interface TestSolutionInput {
 export interface CodeGenerationAgent {
   readonly role: "code-generator";
   generate(input: GenerateSolutionInput): Promise<SolutionCandidate>;
+  generateCandidates?(input: GenerateSolutionInput): Promise<SolutionCandidate[]>;
 }
 
 export interface CodeTestingAgent {

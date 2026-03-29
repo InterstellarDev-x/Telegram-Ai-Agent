@@ -48,77 +48,90 @@ export class SupervisorAgent {
         correlationId,
       );
 
-      const candidate = await this.options.generator.generate({
+      const generationInput = {
         problem: request.problem,
         attempt,
         feedbackHistory,
         previousCandidates,
-      });
+      };
 
-      finalCandidate = candidate;
-      previousCandidates.push(candidate);
+      const candidates = this.options.generator.generateCandidates
+        ? await this.options.generator.generateCandidates(generationInput)
+        : [await this.options.generator.generate(generationInput)];
 
-      this.options.transport.send(
-        "code-generator",
-        "supervisor",
-        "generation.response",
-        {
-          attempt,
-          language: candidate.language,
-          strategy: candidate.strategy,
-        },
-        correlationId,
-      );
+      for (const [candidateIndex, candidate] of candidates.entries()) {
+        finalCandidate = candidate;
+        previousCandidates.push(candidate);
 
-      this.options.transport.send(
-        "supervisor",
-        "code-tester",
-        "testing.request",
-        {
-          attempt,
-          language: candidate.language,
-        },
-        correlationId,
-      );
+        this.options.transport.send(
+          "code-generator",
+          "supervisor",
+          "generation.response",
+          {
+            attempt,
+            candidateIndex: candidateIndex + 1,
+            language: candidate.language,
+            provider: candidate.provider,
+            strategy: candidate.strategy,
+          },
+          correlationId,
+        );
 
-      const report = await this.options.tester.test({
-        problem: request.problem,
-        attempt,
-        candidate,
-      });
+        this.options.transport.send(
+          "supervisor",
+          "code-tester",
+          "testing.request",
+          {
+            attempt,
+            candidateIndex: candidateIndex + 1,
+            language: candidate.language,
+            provider: candidate.provider,
+          },
+          correlationId,
+        );
 
-      finalReport = report;
-
-      this.options.transport.send(
-        "code-tester",
-        "supervisor",
-        "testing.response",
-        {
-          attempt,
-          status: report.status,
-          verdict: report.verdict,
-        },
-        correlationId,
-      );
-
-      if (report.status === "passed") {
-        this.logger.info("workflow-passed", {
-          attempt,
-          problemId: request.problem.id,
-        });
-
-        return supervisorRunResultSchema.parse({
-          status: "passed",
-          attemptsUsed: attempt,
+        const report = await this.options.tester.test({
           problem: request.problem,
-          finalCandidate: candidate,
-          finalReport: report,
-          transcript: this.options.transport.list(correlationId),
+          attempt,
+          candidate,
         });
-      }
 
-      if (report.feedback) {
-        feedbackHistory.push(report.feedback);
+        finalReport = report;
+
+        this.options.transport.send(
+          "code-tester",
+          "supervisor",
+          "testing.response",
+          {
+            attempt,
+            candidateIndex: candidateIndex + 1,
+            provider: candidate.provider,
+            status: report.status,
+            verdict: report.verdict,
+          },
+          correlationId,
+        );
+
+        if (report.status === "passed") {
+          this.logger.info("workflow-passed", {
+            attempt,
+            problemId: request.problem.id,
+            provider: candidate.provider,
+          });
+
+          return supervisorRunResultSchema.parse({
+            status: "passed",
+            attemptsUsed: attempt,
+            problem: request.problem,
+            finalCandidate: candidate,
+            finalReport: report,
+            transcript: this.options.transport.list(correlationId),
+          });
+        }
+
+        if (report.feedback) {
+          feedbackHistory.push(report.feedback);
+        }
       }
     }
 
