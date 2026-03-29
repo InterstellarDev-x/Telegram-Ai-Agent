@@ -7,6 +7,10 @@ import {
 } from "../contracts/agents.js";
 import type { Logger } from "../utils/logger.js";
 
+const modelSolutionCandidateSchema = solutionCandidateSchema.omit({
+  provider: true,
+});
+
 const CODE_GENERATION_SYSTEM_PROMPT = `
 You are the Code Generation Agent in a coding-problem solving backend.
 
@@ -41,12 +45,12 @@ export class DeepAgentCodeGenerationAgent implements CodeGenerationAgent {
     });
 
     const prompt = buildGenerationPrompt(input);
-    const structured = solutionCandidateSchema.parse(
+    const structured = modelSolutionCandidateSchema.parse(
       await invokeStructuredModel(
         this.model,
         CODE_GENERATION_SYSTEM_PROMPT,
         prompt,
-        solutionCandidateSchema,
+        modelSolutionCandidateSchema,
       ),
     );
 
@@ -128,7 +132,7 @@ async function invokeStructuredModel(
   model: BaseLanguageModel,
   systemPrompt: string,
   userPrompt: string,
-  schema: typeof solutionCandidateSchema,
+  schema: typeof modelSolutionCandidateSchema,
 ): Promise<unknown> {
   const structuredModel = model as BaseLanguageModel & StructuredAgent;
   if (typeof structuredModel.withStructuredOutput !== "function") {
