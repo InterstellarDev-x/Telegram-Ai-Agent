@@ -15,8 +15,6 @@ const FUNCTION_SIGNATURE_PATTERN =
   /function\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*:\s*([^\n{]+)/i;
 const EXAMPLE_PATTERN =
   /Example\s+(\d+):\s*Input:\s*([\s\S]*?)\s*Output:\s*([\s\S]*?)(?=\n\s*Example\s+\d+:|\n\s*Constraints:|$)/gi;
-const EXAMPLE_BLOCK_PATTERN =
-  /Example\s*:?\s*[\r\n]+\s*input\s*[\r\n]+\s*([\s\S]*?)\s*[\r\n]+\s*output\s*[\r\n]+\s*([\s\S]*?)(?=\n\s*(?:Note|Explanation|Example|Constraints|Input|Output|$))/gi;
 const CASE_PATTERN =
   /Case\s+(\d+)\s*[\s\S]*?Input:\s*([\s\S]*?)\s*Output:\s*([\s\S]*?)(?=\n\s*Explanation:|\n\s*Case\s+\d+|\n\s*Constraints:|$)/gi;
 const MERGE_K_LISTS_PATTERN =
@@ -846,10 +844,11 @@ function extractTitle(question: string): string {
 function extractExamples(question: string): ExtractedExample[] {
   const examples: ExtractedExample[] = [];
   collectExamples(question, EXAMPLE_PATTERN, "example", examples);
-  collectUnnamedExamples(question, EXAMPLE_BLOCK_PATTERN, "example", examples);
+  const examplesRegion = extractExamplesRegion(question);
+  collectScannedInputOutputExamples(examplesRegion, "sample", examples);
   collectExamples(question, CASE_PATTERN, "case", examples);
 
-  return examples;
+  return dedupeExamples(examples);
 }
 
 function collectExamples(
@@ -879,19 +878,66 @@ function collectExamples(
   }
 }
 
-function collectUnnamedExamples(
-  question: string,
-  pattern: RegExp,
+function extractExamplesRegion(question: string): string {
+  const matcher = question.match(/\b(?:examples?|sample test cases?|sample input)\b/i);
+  if (!matcher?.index && matcher?.index !== 0) {
+    return question;
+  }
+
+  return question.slice(matcher.index);
+}
+
+function collectScannedInputOutputExamples(
+  examplesRegion: string,
   prefix: string,
   examples: ExtractedExample[],
 ): void {
-  const matcher = new RegExp(pattern.source, pattern.flags);
-  let match: RegExpExecArray | null = null;
+  const lines = examplesRegion.replace(/\r/g, "").split("\n");
+  let index = 0;
 
-  while ((match = matcher.exec(question)) !== null) {
-    const inputText = match[1]?.trim() ?? "";
-    const outputText = match[2]?.trim() ?? "";
+  while (index < lines.length) {
+    if (!isInputHeading(lines[index] ?? "")) {
+      index += 1;
+      continue;
+    }
 
+    index += 1;
+    while (index < lines.length && !lines[index]?.trim()) {
+      index += 1;
+    }
+
+    const inputLines: string[] = [];
+    while (index < lines.length && !isOutputHeading(lines[index] ?? "")) {
+      if (isTerminalSampleHeading(lines[index] ?? "")) {
+        break;
+      }
+
+      inputLines.push(lines[index] ?? "");
+      index += 1;
+    }
+
+    if (index >= lines.length || !isOutputHeading(lines[index] ?? "")) {
+      continue;
+    }
+
+    index += 1;
+    while (index < lines.length && !lines[index]?.trim()) {
+      index += 1;
+    }
+
+    const outputLines: string[] = [];
+    while (index < lines.length) {
+      const line = lines[index] ?? "";
+      if (isInputHeading(line) || isTerminalSampleHeading(line)) {
+        break;
+      }
+
+      outputLines.push(line);
+      index += 1;
+    }
+
+    const inputText = normalizeExpectedOutput(inputLines.join("\n"));
+    const outputText = normalizeExpectedOutput(outputLines.join("\n"));
     if (!inputText || !outputText) {
       continue;
     }
@@ -902,6 +948,40 @@ function collectUnnamedExamples(
       outputText,
     });
   }
+}
+
+function dedupeExamples(examples: ExtractedExample[]): ExtractedExample[] {
+  const seen = new Set<string>();
+  const deduped: ExtractedExample[] = [];
+
+  for (const example of examples) {
+    const key = `${example.inputText}\n---\n${example.outputText}`
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(example);
+  }
+
+  return deduped;
+}
+
+function isInputHeading(line: string): boolean {
+  return /^(?:sample\s+)?input\b(?:\s*\d+)?\s*:?\s*$/i.test(line.trim());
+}
+
+function isOutputHeading(line: string): boolean {
+  return /^(?:sample\s+)?output\b(?:\s*\d+)?\s*:?\s*$/i.test(line.trim());
+}
+
+function isTerminalSampleHeading(line: string): boolean {
+  return /^(?:note|notes|explanation|constraints|input format|output format)\b/i.test(
+    line.trim(),
+  );
 }
 
 function extractParameterNames(functionSignature: string): string[] {

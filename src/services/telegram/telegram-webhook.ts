@@ -404,8 +404,16 @@ function combineExtractedProblemText(
   extractedSegments: ProblemImageExtractionResult[],
 ): string {
   const seenBlocks = new Set<string>();
-  const statementParts: string[] = [];
   const templateParts: string[] = [];
+  const sectionBlocks = {
+    title: [] as string[],
+    statement: [] as string[],
+    input: [] as string[],
+    output: [] as string[],
+    constraints: [] as string[],
+    examples: [] as string[],
+    notes: [] as string[],
+  };
 
   const orderedSegments = [...extractedSegments].sort((left, right) => {
     return rankImageKind(left.imageKind) - rankImageKind(right.imageKind);
@@ -414,9 +422,25 @@ function combineExtractedProblemText(
   for (const segment of orderedSegments) {
     const normalizedQuestion = normalizeExtractedBlock(segment.questionText);
     const normalizedTemplate = normalizeExtractedBlock(segment.starterTemplateText);
+    const normalizedSections = normalizeExtractedSections(segment.sections);
 
-    if (normalizedQuestion) {
-      pushUniqueMergedBlock(statementParts, seenBlocks, normalizedQuestion);
+    for (const [key, value] of Object.entries(normalizedSections)) {
+      if (!value) {
+        continue;
+      }
+
+      pushUniqueMergedBlock(
+        sectionBlocks[key as keyof typeof sectionBlocks],
+        seenBlocks,
+        value,
+      );
+    }
+
+    if (
+      normalizedQuestion &&
+      !hasAnyStructuredSections(normalizedSections)
+    ) {
+      pushUniqueMergedBlock(sectionBlocks.statement, seenBlocks, normalizedQuestion);
     }
 
     if (normalizedTemplate) {
@@ -424,7 +448,7 @@ function combineExtractedProblemText(
     }
   }
 
-  const mergedStatement = statementParts.join("\n\n").trim();
+  const mergedStatement = buildMergedStatementFromSections(sectionBlocks).trim();
   const mergedTemplate = templateParts.join("\n\n").trim();
   if (!mergedTemplate) {
     return mergedStatement;
@@ -633,14 +657,71 @@ function normalizeExtractedBlock(text: string): string {
     .replace(/\u0000rst\b/gi, "first")
     .replace(/\u0000nal\b/gi, "final")
     .replace(/\u0000/g, "")
+    .replace(/≤/g, "<=")
+    .replace(/≥/g, ">=")
+    .replace(/−/g, "-")
+    .replace(/×/g, "x")
+    .replace(/⋅/g, "*")
     .replace(/[“”]/g, '"')
     .replace(/[‘’]/g, "'")
     .replace(/[–—]/g, "-")
     .replace(/\b10\s*\^\s*(\d+)\b/g, "10^$1")
+    .replace(/\b\d{1,3}(?: \d{3})+\b/g, (match) => match.replace(/ /g, ""))
     .replace(/\r/g, "")
     .split("\n")
     .map((line) => line.replace(/\s+/g, " ").trim())
     .filter((line, index, lines) => line.length > 0 || (index > 0 && lines[index - 1] !== ""))
     .join("\n")
+    .trim();
+}
+
+function normalizeExtractedSections(
+  sections: ProblemImageExtractionResult["sections"],
+): ProblemImageExtractionResult["sections"] {
+  return {
+    title: normalizeExtractedBlock(sections.title),
+    statement: normalizeExtractedBlock(sections.statement),
+    input: normalizeExtractedBlock(sections.input),
+    output: normalizeExtractedBlock(sections.output),
+    constraints: normalizeExtractedBlock(sections.constraints),
+    examples: normalizeExtractedBlock(sections.examples),
+    notes: normalizeExtractedBlock(sections.notes),
+  };
+}
+
+function hasAnyStructuredSections(
+  sections: ProblemImageExtractionResult["sections"],
+): boolean {
+  return Object.values(sections).some((value) => value.length > 0);
+}
+
+function buildMergedStatementFromSections(sections: {
+  title: string[];
+  statement: string[];
+  input: string[];
+  output: string[];
+  constraints: string[];
+  examples: string[];
+  notes: string[];
+}): string {
+  const title = sections.title.join("\n\n").trim();
+  const statement = sections.statement.join("\n\n").trim();
+  const input = sections.input.join("\n\n").trim();
+  const output = sections.output.join("\n\n").trim();
+  const constraints = sections.constraints.join("\n\n").trim();
+  const examples = sections.examples.join("\n\n").trim();
+  const notes = sections.notes.join("\n\n").trim();
+
+  return [
+    title,
+    statement,
+    input ? `Input\n${input}` : "",
+    output ? `Output\n${output}` : "",
+    constraints ? `Constraints\n${constraints}` : "",
+    examples ? `Examples\n${examples}` : "",
+    notes ? `Notes\n${notes}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n\n")
     .trim();
 }

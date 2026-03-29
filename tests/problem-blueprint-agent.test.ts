@@ -188,4 +188,63 @@ The number 1 does not have any friendly numbers.
       }
     }
   });
+
+  test("builds a stdin/stdout solve request from sample input and sample output blocks", async () => {
+    const originalApiKey = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+
+    try {
+      const blueprint = await parseRawQuestionToBlueprint(
+        {
+          question: `
+Grid Sum
+
+You are given an integer n.
+
+Input Format
+The first line contains one integer n.
+
+Output Format
+Print the answer.
+
+Sample Input 1:
+3
+1 2 3
+
+Sample Output 1:
+6
+
+Sample Input 2:
+4
+5 5 5 5
+
+Sample Output 2:
+20
+          `.trim(),
+          targetLanguage: "cpp",
+          maxAttempts: 4,
+          imageAssets: [],
+          extractionWarnings: [],
+        },
+        new MemoryLogger("test"),
+      );
+
+      expect(blueprint.detectedStyle).toBe("stdin_stdout");
+      expect(blueprint.suggestedSolveRequest?.harness.tests).toHaveLength(2);
+      expect(blueprint.suggestedSolveRequest?.harness.tests[0]?.input).toEqual({
+        stdin: "3\n1 2 3",
+      });
+      expect(blueprint.suggestedSolveRequest?.harness.tests[0]?.expected).toBe("6");
+      expect(blueprint.suggestedSolveRequest?.harness.tests[1]?.input).toEqual({
+        stdin: "4\n5 5 5 5",
+      });
+      expect(blueprint.suggestedSolveRequest?.harness.tests[1]?.expected).toBe("20");
+    } finally {
+      if (originalApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalApiKey;
+      }
+    }
+  });
 });

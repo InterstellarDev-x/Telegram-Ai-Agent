@@ -11,6 +11,25 @@ const extractedImageProblemSchema = z.object({
     .enum(["statement", "template", "mixed", "unknown"])
     .default("unknown"),
   visibleSections: z.array(z.string()).default([]),
+  sections: z
+    .object({
+      title: z.string().default(""),
+      statement: z.string().default(""),
+      input: z.string().default(""),
+      output: z.string().default(""),
+      constraints: z.string().default(""),
+      examples: z.string().default(""),
+      notes: z.string().default(""),
+    })
+    .default({
+      title: "",
+      statement: "",
+      input: "",
+      output: "",
+      constraints: "",
+      examples: "",
+      notes: "",
+    }),
   issues: z.array(z.string()).default([]),
 });
 
@@ -27,6 +46,15 @@ export interface ProblemImageExtractionResult {
   coverage: "complete" | "partial";
   imageKind: "statement" | "template" | "mixed" | "unknown";
   visibleSections: string[];
+  sections: {
+    title: string;
+    statement: string;
+    input: string;
+    output: string;
+    constraints: string;
+    examples: string;
+    notes: string;
+  };
   issues: string[];
 }
 
@@ -57,6 +85,7 @@ Return a JSON object with these fields:
 - coverage: "complete" if this image appears to contain the whole problem, otherwise "partial"
 - imageKind: "statement", "template", "mixed", or "unknown"
 - visibleSections: short labels such as "title", "statement", "input format", "constraints", "sample tests", "template"
+- sections: structured text buckets with keys title, statement, input, output, constraints, examples, notes
 - issues: short reasons if the image is blurry, cropped, obscured, or otherwise hard to read
 
 Rules:
@@ -70,6 +99,7 @@ Rules:
 - Ignore editor chrome, line numbers, tabs, sidebars, cursors, scrollbars, and UI labels unless they are part of the actual problem or starter code.
 - Do not confuse sample-case labels, explanations, or template code with website UI text.
 - questionText should contain only actual problem content. starterTemplateText should contain only the required code/template content.
+- Put text into sections whenever possible. If a section is not visible, return an empty string for it.
 - Normalize broken OCR whitespace only when needed for readability, but do not invent missing sections.
 - Do not explain anything.
 - Do not wrap the result in markdown.
@@ -108,6 +138,7 @@ Rules:
                 "coverage",
                 "imageKind",
                 "visibleSections",
+                "sections",
                 "issues",
               ],
               properties: {
@@ -133,6 +164,28 @@ Rules:
                   type: "array",
                   items: {
                     type: "string",
+                  },
+                },
+                sections: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: [
+                    "title",
+                    "statement",
+                    "input",
+                    "output",
+                    "constraints",
+                    "examples",
+                    "notes",
+                  ],
+                  properties: {
+                    title: { type: "string" },
+                    statement: { type: "string" },
+                    input: { type: "string" },
+                    output: { type: "string" },
+                    constraints: { type: "string" },
+                    examples: { type: "string" },
+                    notes: { type: "string" },
                   },
                 },
                 issues: {
@@ -164,6 +217,15 @@ Rules:
       coverage: parsed.coverage,
       imageKind: parsed.imageKind,
       visibleSections: parsed.visibleSections,
+      sections: {
+        title: parsed.sections.title.trim(),
+        statement: parsed.sections.statement.trim(),
+        input: parsed.sections.input.trim(),
+        output: parsed.sections.output.trim(),
+        constraints: parsed.sections.constraints.trim(),
+        examples: parsed.sections.examples.trim(),
+        notes: parsed.sections.notes.trim(),
+      },
       issues: parsed.issues,
     };
   }
