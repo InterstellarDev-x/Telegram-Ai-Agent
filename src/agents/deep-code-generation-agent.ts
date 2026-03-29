@@ -20,6 +20,7 @@ Your job:
 - If the requested language is cpp, produce a complete C++17 solution by default.
 - Prefer stdin/stdout solutions unless the problem explicitly requires a particular class, function, or starter-code shape.
 - If the screenshots or statement contain starter code or a predefined signature, preserve that interface exactly.
+- The screenshots may include separate boilerplate/template images. If a template is present, complete that template instead of rewriting the interface from scratch.
 - Prefer straightforward, reliable code over cleverness.
 - Pay close attention to constraints and choose an algorithm that fits them.
 - Use all provided sample tests and explanations as consistency checks, but do not hardcode sample outputs.
@@ -112,6 +113,11 @@ ${priorCodeBlock}
 
 Prior tester feedback:
 ${feedbackBlock}
+
+Important:
+- Treat the extracted statement as coming from screenshots that may include both the problem text and a visible starter template.
+- If the statement contains boilerplate code, preserve its interface and fill in the solution within that structure.
+- If no explicit template is present, prefer a complete C++17 stdin/stdout solution.
 
 Return structured output with:
 - language

@@ -52,6 +52,10 @@ Rules:
 - Preserve the problem title, difficulty label, statement, examples, input/output blocks, sample test cases, constraints, and explanations.
 - Preserve any starter code, predefined function signatures, class names, or required method names if they appear.
 - Preserve exact identifiers and structured sections such as "Input Format", "Output Format", "Sample Test Cases", and "Constraints".
+- These screenshots may show the problem statement on one side and a code editor or boilerplate template on the other side.
+- If a code editor, starter template, function signature, or class skeleton is visible, include it under the reconstructed text instead of ignoring it.
+- Ignore editor chrome, line numbers, tabs, sidebars, cursors, scrollbars, and UI labels unless they are part of the actual problem or starter code.
+- Do not confuse sample-case labels, explanations, or template code with website UI text.
 - Normalize broken OCR whitespace only when needed for readability, but do not invent missing sections.
 - Do not explain anything.
 - Do not wrap the result in markdown.

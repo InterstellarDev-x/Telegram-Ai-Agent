@@ -142,7 +142,9 @@ Rules:
 - Return JSON only through the structured schema.
 - Prefer exact extraction from the question text.
 - These inputs are often exam-style screenshots with sections like Input Format, Constraints, Sample Test Cases, and explanations.
+- The screenshots may include separate boilerplate/template images or a split-screen editor view.
 - Preserve any visible starter code, predefined class/function signatures, and required method names in normalizedStatement.
+- Ignore UI chrome, line numbers, tabs, and editor furniture unless they are part of the required code template.
 - Prefer detectedStyle = "stdin_stdout" unless the problem clearly requires a fixed callable signature.
 - If you are not confident enough to build a valid solve request, leave suggestedSolveRequest undefined.
 - When you can infer a function-style problem, build suggestedSolveRequest compatible with the solver API.
@@ -298,6 +300,7 @@ Rules:
 - Return JSON only through the structured schema.
 - Prefer a function-style harness.
 - These questions may be exam-style stdin/stdout problems without an explicit function signature.
+- If the statement includes starter code or a predefined callable interface, use that exact interface instead of inventing a new one.
 - If the exact function signature is missing, infer the most likely canonical LeetCode-style signature from the problem title, statement, and examples.
 - Use the example input variable names when building the signature and invoke expression.
 - Return only metadata for a single function implementation requirement, not stdin/stdout.
