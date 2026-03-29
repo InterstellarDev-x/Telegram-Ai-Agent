@@ -1,4 +1,4 @@
-import type { SseEvent } from "../../contracts/http.ts";
+import type { SseEvent } from "../../contracts/http.js";
 
 function encodeSseEvent(event: SseEvent): string {
   return `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;

@@ -3,11 +3,11 @@ import type {
   CodeTestingAgent,
   GenerateSolutionInput,
   SupervisorRunResult,
-} from "../contracts/agents.ts";
-import { supervisorRunResultSchema } from "../contracts/agents.ts";
-import type { SolveProblemRequest } from "../contracts/problem.ts";
-import { InMemoryAgentTransport } from "../services/agent-transport.ts";
-import type { Logger } from "../utils/logger.ts";
+} from "../contracts/agents.js";
+import { supervisorRunResultSchema } from "../contracts/agents.js";
+import type { SolveProblemRequest } from "../contracts/problem.js";
+import { InMemoryAgentTransport } from "../services/agent-transport.js";
+import type { Logger } from "../utils/logger.js";
 
 interface SupervisorAgentOptions {
   generator: CodeGenerationAgent;

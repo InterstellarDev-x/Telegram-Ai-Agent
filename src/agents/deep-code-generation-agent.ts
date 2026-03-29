@@ -5,8 +5,8 @@ import {
   type CodeGenerationAgent,
   type GenerateSolutionInput,
   type SolutionCandidate,
-} from "../contracts/agents.ts";
-import type { Logger } from "../utils/logger.ts";
+} from "../contracts/agents.js";
+import type { Logger } from "../utils/logger.js";
 
 const CODE_GENERATION_SYSTEM_PROMPT = `
 You are the Code Generation Agent in a coding-problem solving backend.

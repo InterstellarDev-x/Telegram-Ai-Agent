@@ -1,4 +1,4 @@
-import type { CodingProblem, ProblemTestCase, SupportedLanguage } from "../contracts/problem.ts";
+import type { CodingProblem, ProblemTestCase, SupportedLanguage } from "../contracts/problem.js";
 
 interface BuildProblemInput {
   rawText: string;

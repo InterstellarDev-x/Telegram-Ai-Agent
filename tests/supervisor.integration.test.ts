@@ -1,17 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { DeepAgentCodeTestingAgent } from "../src/agents/deep-code-testing-agent.ts";
-import { ScriptedCodeGenerationAgent } from "../src/agents/scripted-code-generation-agent.ts";
-import { SupervisorAgent } from "../src/agents/supervisor-agent.ts";
-import type { SolutionCandidate } from "../src/contracts/agents.ts";
-import { InMemoryAgentTransport } from "../src/services/agent-transport.ts";
+import { DeepAgentCodeTestingAgent } from "../src/agents/deep-code-testing-agent.js";
+import { ScriptedCodeGenerationAgent } from "../src/agents/scripted-code-generation-agent.js";
+import { SupervisorAgent } from "../src/agents/supervisor-agent.js";
+import type { SolutionCandidate } from "../src/contracts/agents.js";
+import { InMemoryAgentTransport } from "../src/services/agent-transport.js";
 import {
   BunJavaScriptExecutor,
   BunTypeScriptExecutor,
-} from "../src/services/execution/bun-executor.ts";
-import { ExecutorRegistry } from "../src/services/execution/executor-registry.ts";
-import { PythonExecutor } from "../src/services/execution/python-executor.ts";
-import { MemoryLogger } from "../src/utils/logger.ts";
-import { createDemoProblem } from "../src/demo/problem-fixtures.ts";
+} from "../src/services/execution/bun-executor.js";
+import { ExecutorRegistry } from "../src/services/execution/executor-registry.js";
+import { PythonExecutor } from "../src/services/execution/python-executor.js";
+import { MemoryLogger } from "../src/utils/logger.js";
+import { createDemoProblem } from "../src/demo/problem-fixtures.js";
 
 function buildAttempts(): SolutionCandidate[] {
   return [

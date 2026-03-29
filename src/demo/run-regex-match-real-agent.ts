@@ -1,18 +1,18 @@
-import { DeepAgentCodeGenerationAgent } from "../agents/deep-code-generation-agent.ts";
-import { SupervisorAgent } from "../agents/supervisor-agent.ts";
+import { DeepAgentCodeGenerationAgent } from "../agents/deep-code-generation-agent.js";
+import { SupervisorAgent } from "../agents/supervisor-agent.js";
 import type {
   CodeTestingAgent,
   ExecutedCase,
   GenerationFeedback,
   TestSolutionInput,
   TestingReport,
-} from "../contracts/agents.ts";
-import type { CodingProblem } from "../contracts/problem.ts";
-import { InMemoryAgentTransport } from "../services/agent-transport.ts";
-import { BunTypeScriptExecutor } from "../services/execution/bun-executor.ts";
-import { createOpenAIChatModel } from "../services/llm/openai-chat-model.ts";
-import type { Logger } from "../utils/logger.ts";
-import { ConsoleLogger } from "../utils/logger.ts";
+} from "../contracts/agents.js";
+import type { CodingProblem } from "../contracts/problem.js";
+import { InMemoryAgentTransport } from "../services/agent-transport.js";
+import { BunTypeScriptExecutor } from "../services/execution/bun-executor.js";
+import { createOpenAIChatModel } from "../services/llm/openai-chat-model.js";
+import type { Logger } from "../utils/logger.js";
+import { ConsoleLogger } from "../utils/logger.js";
 
 interface RegexCase {
   name: string;

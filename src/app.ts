@@ -1,11 +1,11 @@
-import { CallbackLogger } from "./utils/logger.ts";
-import { createSseResponse, SseEventStream } from "./services/streaming/sse.ts";
+import { CallbackLogger } from "./utils/logger.js";
+import { createSseResponse, SseEventStream } from "./services/streaming/sse.js";
 import {
   rawQuestionRequestSchema,
   streamedSolveRequestSchema,
   type RawQuestionRequest,
   type StreamedSolveRequest,
-} from "./contracts/http.ts";
+} from "./contracts/http.js";
 
 export async function handleHttpRequest(request: Request): Promise<Response> {
   const pathname = new URL(request.url).pathname;
@@ -113,7 +113,7 @@ async function handleParseProblem(request: Request): Promise<Response> {
 
   const logger = new CallbackLogger("parser-api", () => {});
   const { parseRawQuestionToBlueprint } = await import(
-    "./services/parsing/problem-blueprint-agent.ts"
+    "./services/parsing/problem-blueprint-agent.js"
   );
   const blueprint = await parseRawQuestionToBlueprint(parsed.data, logger);
   return jsonResponse(blueprint);
@@ -135,7 +135,7 @@ async function handleTelegramWebhook(request: Request): Promise<Response> {
     }
 
     const { processTelegramUpdate, validateTelegramWebhookRequest } = await import(
-      "./services/telegram/telegram-webhook.ts"
+      "./services/telegram/telegram-webhook.js"
     );
     const update = await validateTelegramWebhookRequest(request);
     const logger = new CallbackLogger("telegram-webhook", (entry) => {
@@ -175,7 +175,7 @@ async function runSolve(
 
   try {
     const { solveWithFunctionHarness } = await import(
-      "./services/solvers/function-harness-solver.ts"
+      "./services/solvers/function-harness-solver.js"
     );
     const result = await solveWithFunctionHarness(request, logger);
 
@@ -206,7 +206,7 @@ async function runSolveFromText(
   });
 
   try {
-    const { solveRawQuestion } = await import("./services/solvers/raw-question-solver.ts");
+    const { solveRawQuestion } = await import("./services/solvers/raw-question-solver.js");
     const outcome = await solveRawQuestion(request, logger);
     const { blueprint, result } = outcome;
     stream.emit("parsed_problem", blueprint);

@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { createOpenAIClient } from "../llm/openai-client.ts";
-import type { Logger } from "../../utils/logger.ts";
+import { createOpenAIClient } from "../llm/openai-client.js";
+import type { Logger } from "../../utils/logger.js";
 
 const extractedImageProblemSchema = z.object({
   questionText: z.string(),

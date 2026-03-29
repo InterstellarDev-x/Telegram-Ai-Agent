@@ -10,11 +10,11 @@ import {
   type TestSolutionInput,
   type TestingPlan,
   type TestingReport,
-} from "../contracts/agents.ts";
-import type { ProblemTestCase } from "../contracts/problem.ts";
-import { ExecutorRegistry } from "../services/execution/executor-registry.ts";
-import { normalizeOutput } from "../utils/output.ts";
-import type { Logger } from "../utils/logger.ts";
+} from "../contracts/agents.js";
+import type { ProblemTestCase } from "../contracts/problem.js";
+import { ExecutorRegistry } from "../services/execution/executor-registry.js";
+import { normalizeOutput } from "../utils/output.js";
+import type { Logger } from "../utils/logger.js";
 
 const TEST_PLAN_PROMPT = `
 You are the Code Testing Agent.

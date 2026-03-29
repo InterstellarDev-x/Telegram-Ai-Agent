@@ -1,5 +1,5 @@
-import type { CodingProblem } from "../contracts/problem.ts";
-import { buildProblemFromRawText } from "../services/problem-normalizer.ts";
+import type { CodingProblem } from "../contracts/problem.js";
+import { buildProblemFromRawText } from "../services/problem-normalizer.js";
 
 export function createDemoProblem(): CodingProblem {
   return buildProblemFromRawText({

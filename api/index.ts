@@ -1,4 +1,4 @@
-import { handleHttpRequest } from "../src/app.ts";
+import { handleHttpRequest } from "../src/app.js";
 
 export default {
   fetch(request: Request) {

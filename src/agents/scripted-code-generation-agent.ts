@@ -2,8 +2,8 @@ import type {
   CodeGenerationAgent,
   GenerateSolutionInput,
   SolutionCandidate,
-} from "../contracts/agents.ts";
-import type { Logger } from "../utils/logger.ts";
+} from "../contracts/agents.js";
+import type { Logger } from "../utils/logger.js";
 
 export class ScriptedCodeGenerationAgent implements CodeGenerationAgent {
   readonly role = "code-generator" as const;

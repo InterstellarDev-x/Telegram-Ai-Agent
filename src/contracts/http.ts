@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { codingProblemSchema, supportedLanguages } from "./problem.ts";
+import { codingProblemSchema, supportedLanguages } from "./problem.js";
 
 export const streamedTestCaseSchema = z.object({
   name: z.string(),

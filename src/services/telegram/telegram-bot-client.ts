@@ -1,8 +1,8 @@
 import {
   telegramGetFileResponseSchema,
   type TelegramFile,
-} from "../../contracts/telegram.ts";
-import type { Logger } from "../../utils/logger.ts";
+} from "../../contracts/telegram.js";
+import type { Logger } from "../../utils/logger.js";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;

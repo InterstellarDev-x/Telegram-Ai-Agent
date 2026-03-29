@@ -1,24 +1,24 @@
-import { DeepAgentCodeGenerationAgent } from "../../agents/deep-code-generation-agent.ts";
-import { SupervisorAgent } from "../../agents/supervisor-agent.ts";
+import { DeepAgentCodeGenerationAgent } from "../../agents/deep-code-generation-agent.js";
+import { SupervisorAgent } from "../../agents/supervisor-agent.js";
 import type {
   CodeTestingAgent,
   ExecutedCase,
   GenerationFeedback,
   TestSolutionInput,
   TestingReport,
-} from "../../contracts/agents.ts";
+} from "../../contracts/agents.js";
 import type {
   FunctionHarness,
   StreamedSolveRequest,
   StreamedTestCase,
-} from "../../contracts/http.ts";
-import { buildProblemFromHttpRequest } from "../../contracts/http.ts";
-import { InMemoryAgentTransport } from "../agent-transport.ts";
-import { BunJavaScriptExecutor, BunTypeScriptExecutor } from "../execution/bun-executor.ts";
-import { ExecutorRegistry } from "../execution/executor-registry.ts";
-import { PythonExecutor } from "../execution/python-executor.ts";
-import { createOpenAIChatModel } from "../llm/openai-chat-model.ts";
-import type { Logger } from "../../utils/logger.ts";
+} from "../../contracts/http.js";
+import { buildProblemFromHttpRequest } from "../../contracts/http.js";
+import { InMemoryAgentTransport } from "../agent-transport.js";
+import { BunJavaScriptExecutor, BunTypeScriptExecutor } from "../execution/bun-executor.js";
+import { ExecutorRegistry } from "../execution/executor-registry.js";
+import { PythonExecutor } from "../execution/python-executor.js";
+import { createOpenAIChatModel } from "../llm/openai-chat-model.js";
+import type { Logger } from "../../utils/logger.js";
 
 export class FunctionHarnessTestingAgent implements CodeTestingAgent {
   readonly role = "code-tester" as const;

@@ -6,9 +6,9 @@ import {
   type ParsedProblemBlueprint,
   type RawQuestionRequest,
   type StreamedSolveRequest,
-} from "../../contracts/http.ts";
-import { createOpenAIChatModel } from "../llm/openai-chat-model.ts";
-import type { Logger } from "../../utils/logger.ts";
+} from "../../contracts/http.js";
+import { createOpenAIChatModel } from "../llm/openai-chat-model.js";
+import type { Logger } from "../../utils/logger.js";
 
 const FUNCTION_SIGNATURE_PATTERN =
   /function\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*:\s*([^\n{]+)/i;

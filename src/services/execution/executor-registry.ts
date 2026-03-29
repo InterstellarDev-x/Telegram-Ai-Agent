@@ -1,5 +1,5 @@
-import type { SupportedLanguage } from "../../contracts/problem.ts";
-import type { CodeExecutor } from "./code-executor.ts";
+import type { SupportedLanguage } from "../../contracts/problem.js";
+import type { CodeExecutor } from "./code-executor.js";
 
 export class ExecutorRegistry {
   private readonly executors = new Map<SupportedLanguage, CodeExecutor>();

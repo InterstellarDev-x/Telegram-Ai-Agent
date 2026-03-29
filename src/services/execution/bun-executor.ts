@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import ts from "typescript";
-import { ProcessCodeExecutor, runCommand, type ExecutionResult } from "./code-executor.ts";
+import { ProcessCodeExecutor, runCommand, type ExecutionResult } from "./code-executor.js";
 
 export class BunJavaScriptExecutor extends ProcessCodeExecutor {
   readonly language = "javascript";

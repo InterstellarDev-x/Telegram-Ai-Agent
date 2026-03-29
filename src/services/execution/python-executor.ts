@@ -1,4 +1,4 @@
-import { ProcessCodeExecutor } from "./code-executor.ts";
+import { ProcessCodeExecutor } from "./code-executor.js";
 
 export class PythonExecutor extends ProcessCodeExecutor {
   readonly language = "python";

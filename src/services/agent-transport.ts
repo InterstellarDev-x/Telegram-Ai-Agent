@@ -1,5 +1,5 @@
-import type { AgentEnvelope, AgentRole } from "../contracts/agents.ts";
-import type { Logger } from "../utils/logger.ts";
+import type { AgentEnvelope, AgentRole } from "../contracts/agents.js";
+import type { Logger } from "../utils/logger.js";
 
 export class InMemoryAgentTransport {
   private readonly transcript: AgentEnvelope[] = [];

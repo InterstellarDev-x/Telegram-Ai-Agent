@@ -1,12 +1,12 @@
-import type { SupervisorRunResult } from "../../contracts/agents.ts";
+import type { SupervisorRunResult } from "../../contracts/agents.js";
 import type {
   ParsedProblemBlueprint,
   RawQuestionRequest,
   StreamedSolveRequest,
-} from "../../contracts/http.ts";
-import { parseRawQuestionToBlueprint } from "../parsing/problem-blueprint-agent.ts";
-import { solveWithFunctionHarness } from "./function-harness-solver.ts";
-import type { Logger } from "../../utils/logger.ts";
+} from "../../contracts/http.js";
+import { parseRawQuestionToBlueprint } from "../parsing/problem-blueprint-agent.js";
+import { solveWithFunctionHarness } from "./function-harness-solver.js";
+import type { Logger } from "../../utils/logger.js";
 
 export interface RawQuestionSolveResult {
   blueprint: ParsedProblemBlueprint;

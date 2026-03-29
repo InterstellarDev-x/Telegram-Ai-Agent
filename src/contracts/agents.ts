@@ -3,7 +3,7 @@ import {
   codingProblemSchema,
   problemTestCaseSchema,
   supportedLanguages,
-} from "./problem.ts";
+} from "./problem.js";
 
 export const solutionCandidateSchema = z.object({
   language: z.enum(supportedLanguages),

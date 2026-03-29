@@ -1,24 +1,24 @@
-import type { RawQuestionRequest } from "../../contracts/http.ts";
+import type { RawQuestionRequest } from "../../contracts/http.js";
 import {
   telegramUpdateSchema,
   type TelegramMessage,
   type TelegramPhotoSize,
   type TelegramUpdate,
-} from "../../contracts/telegram.ts";
-import { solveRawQuestion } from "../solvers/raw-question-solver.ts";
+} from "../../contracts/telegram.js";
+import { solveRawQuestion } from "../solvers/raw-question-solver.js";
 import {
   ProblemImageExtractor,
   type ProblemImageExtractionResult,
-} from "../vision/problem-image-extractor.ts";
-import { CallbackLogger, type LogEntry, type Logger } from "../../utils/logger.ts";
+} from "../vision/problem-image-extractor.js";
+import { CallbackLogger, type LogEntry, type Logger } from "../../utils/logger.js";
 import {
   createTelegramBotClient,
   type TelegramBotClient,
-} from "./telegram-bot-client.ts";
+} from "./telegram-bot-client.js";
 import {
   telegramSessionStore,
   type PendingTelegramImage,
-} from "./telegram-session-store.ts";
+} from "./telegram-session-store.js";
 
 export async function validateTelegramWebhookRequest(
   request: Request,

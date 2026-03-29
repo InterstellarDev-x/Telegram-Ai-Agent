@@ -1,4 +1,4 @@
-import { handleHttpRequest } from "./app.ts";
+import { handleHttpRequest } from "./app.js";
 
 const port = Number(process.env.PORT ?? 3000);
 
