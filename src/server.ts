@@ -32,6 +32,24 @@ const server = Bun.serve({
         },
       },
     ),
+    "/telegram/health": new Response(
+      JSON.stringify({
+        ok: true,
+        timestamp: new Date().toISOString(),
+        webhookPath: "/telegram/webhook",
+        telegramBotConfigured: Boolean(
+          process.env.TELEGRAM_BOT_TOKEN ??
+            "8599626908:AAFXItwarN2ZkvXQGiPbwX9xami2tLmHZv8",
+        ),
+        openAiConfigured: Boolean(process.env.OPENAI_API_KEY),
+      }),
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "Access-Control-Allow-Origin": "*",
+        },
+      },
+    ),
   },
   fetch(request) {
     if (request.method === "OPTIONS") {
