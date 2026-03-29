@@ -15,6 +15,8 @@ const FUNCTION_SIGNATURE_PATTERN =
   /function\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*:\s*([^\n{]+)/i;
 const EXAMPLE_PATTERN =
   /Example\s+(\d+):\s*Input:\s*([\s\S]*?)\s*Output:\s*([\s\S]*?)(?=\n\s*Example\s+\d+:|\n\s*Constraints:|$)/gi;
+const EXAMPLE_BLOCK_PATTERN =
+  /Example\s*:?\s*[\r\n]+\s*input\s*[\r\n]+\s*([\s\S]*?)\s*[\r\n]+\s*output\s*[\r\n]+\s*([\s\S]*?)(?=\n\s*(?:Note|Explanation|Example|Constraints|Input|Output|$))/gi;
 const CASE_PATTERN =
   /Case\s+(\d+)\s*[\s\S]*?Input:\s*([\s\S]*?)\s*Output:\s*([\s\S]*?)(?=\n\s*Explanation:|\n\s*Case\s+\d+|\n\s*Constraints:|$)/gi;
 const MERGE_K_LISTS_PATTERN =
@@ -844,6 +846,7 @@ function extractTitle(question: string): string {
 function extractExamples(question: string): ExtractedExample[] {
   const examples: ExtractedExample[] = [];
   collectExamples(question, EXAMPLE_PATTERN, "example", examples);
+  collectUnnamedExamples(question, EXAMPLE_BLOCK_PATTERN, "example", examples);
   collectExamples(question, CASE_PATTERN, "case", examples);
 
   return examples;
@@ -870,6 +873,31 @@ function collectExamples(
 
     examples.push({
       name: `${prefix}-${exampleNumber}`,
+      inputText,
+      outputText,
+    });
+  }
+}
+
+function collectUnnamedExamples(
+  question: string,
+  pattern: RegExp,
+  prefix: string,
+  examples: ExtractedExample[],
+): void {
+  const matcher = new RegExp(pattern.source, pattern.flags);
+  let match: RegExpExecArray | null = null;
+
+  while ((match = matcher.exec(question)) !== null) {
+    const inputText = match[1]?.trim() ?? "";
+    const outputText = match[2]?.trim() ?? "";
+
+    if (!inputText || !outputText) {
+      continue;
+    }
+
+    examples.push({
+      name: `${prefix}-${examples.length + 1}`,
       inputText,
       outputText,
     });
@@ -946,7 +974,7 @@ function normalizeExpectedOutput(outputText: string): string {
 }
 
 function looksLikeCompetitiveProblem(question: string): boolean {
-  return /input format|sample test cases|\bcase\s+\d+\b|constraints/i.test(
+  return /input format|sample test cases|\bcase\s+\d+\b|constraints|\ninput\b|\noutput\b|\nexample\b|time limit|memory limit/i.test(
     question,
   );
 }
