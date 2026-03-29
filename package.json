@@ -1,12 +1,12 @@
 {
   "name": "hackwithinfy",
-  "module": "index.ts",
+  "module": "src/server.ts",
   "type": "module",
   "private": true,
   "scripts": {
-    "start": "bun run index.ts",
+    "start": "bun run src/server.ts",
     "serve": "bun run src/server.ts",
-    "demo": "bun run index.ts",
+    "demo": "bun run src/demo/run-example.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
