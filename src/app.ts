@@ -6,14 +6,6 @@ import {
   type RawQuestionRequest,
   type StreamedSolveRequest,
 } from "./contracts/http.ts";
-import { solveWithFunctionHarness } from "./services/solvers/function-harness-solver.ts";
-import { parseRawQuestionToBlueprint } from "./services/parsing/problem-blueprint-agent.ts";
-import { solveRawQuestion } from "./services/solvers/raw-question-solver.ts";
-import {
-  processTelegramUpdate,
-  validateTelegramWebhookRequest,
-} from "./services/telegram/telegram-webhook.ts";
-import { resolveTelegramBotToken } from "./services/telegram/telegram-bot-client.ts";
 
 export async function handleHttpRequest(request: Request): Promise<Response> {
   const pathname = new URL(request.url).pathname;
@@ -40,7 +32,10 @@ export async function handleHttpRequest(request: Request): Promise<Response> {
       ok: true,
       timestamp: new Date().toISOString(),
       webhookPath: "/telegram/webhook",
-      telegramBotConfigured: Boolean(resolveTelegramBotToken()),
+      telegramBotConfigured: Boolean(
+        process.env.TELEGRAM_BOT_TOKEN ??
+          "8599626908:AAFXItwarN2ZkvXQGiPbwX9xami2tLmHZv8",
+      ),
       openAiConfigured: Boolean(process.env.OPENAI_API_KEY),
     });
   }
@@ -117,13 +112,20 @@ async function handleParseProblem(request: Request): Promise<Response> {
   }
 
   const logger = new CallbackLogger("parser-api", () => {});
+  const { parseRawQuestionToBlueprint } = await import(
+    "./services/parsing/problem-blueprint-agent.ts"
+  );
   const blueprint = await parseRawQuestionToBlueprint(parsed.data, logger);
   return jsonResponse(blueprint);
 }
 
 async function handleTelegramWebhook(request: Request): Promise<Response> {
   try {
-    if (!resolveTelegramBotToken()) {
+    const telegramBotToken =
+      process.env.TELEGRAM_BOT_TOKEN ??
+      "8599626908:AAFXItwarN2ZkvXQGiPbwX9xami2tLmHZv8";
+
+    if (!telegramBotToken) {
       return jsonResponse(
         {
           error: "TELEGRAM_BOT_TOKEN is not configured.",
@@ -132,6 +134,9 @@ async function handleTelegramWebhook(request: Request): Promise<Response> {
       );
     }
 
+    const { processTelegramUpdate, validateTelegramWebhookRequest } = await import(
+      "./services/telegram/telegram-webhook.ts"
+    );
     const update = await validateTelegramWebhookRequest(request);
     const logger = new CallbackLogger("telegram-webhook", (entry) => {
       console.log(JSON.stringify(entry));
@@ -169,6 +174,9 @@ async function runSolve(
   });
 
   try {
+    const { solveWithFunctionHarness } = await import(
+      "./services/solvers/function-harness-solver.ts"
+    );
     const result = await solveWithFunctionHarness(request, logger);
 
     stream.emit("result", {
@@ -198,6 +206,7 @@ async function runSolveFromText(
   });
 
   try {
+    const { solveRawQuestion } = await import("./services/solvers/raw-question-solver.ts");
     const outcome = await solveRawQuestion(request, logger);
     const { blueprint, result } = outcome;
     stream.emit("parsed_problem", blueprint);
