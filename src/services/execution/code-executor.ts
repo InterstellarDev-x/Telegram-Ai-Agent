@@ -53,7 +53,7 @@ export abstract class ProcessCodeExecutor implements CodeExecutor {
   }
 }
 
-async function runCommand(
+export async function runCommand(
   command: string,
   args: string[],
   stdin: string,

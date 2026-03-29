@@ -144,8 +144,12 @@ export class TelegramBotClient {
   }
 }
 
+export function resolveTelegramBotToken(): string | undefined {
+  return process.env.TELEGRAM_BOT_TOKEN ?? DEFAULT_DEV_TELEGRAM_BOT_TOKEN;
+}
+
 export function createTelegramBotClient(logger: Logger): TelegramBotClient {
-  const token = process.env.TELEGRAM_BOT_TOKEN ?? DEFAULT_DEV_TELEGRAM_BOT_TOKEN;
+  const token = resolveTelegramBotToken();
 
   if (!token) {
     throw new Error("TELEGRAM_BOT_TOKEN is required.");
