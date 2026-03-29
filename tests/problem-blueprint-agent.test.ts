@@ -55,4 +55,74 @@ Output: true
       }
     }
   });
+
+  test("builds a stdin/stdout solve request from competitive-programming case blocks", async () => {
+    const originalApiKey = process.env.OPENAI_API_KEY;
+    delete process.env.OPENAI_API_KEY;
+
+    try {
+      const blueprint = await parseRawQuestionToBlueprint(
+        {
+          question: `
+Emil's Special Longes
+
+You are given two strings A and B consisting of lowercase English letters.
+
+Emil defines the score of a common subsequence as:
+score = (length of the subsequence) x (number of occurrences of 'e')
+
+Find the maximum score.
+
+Input Format
+The first line contains a string, A.
+The next line contains a string, B.
+
+Constraints
+1 <= len(A) <= 500
+1 <= len(B) <= 500
+
+Sample Test Cases
+Case 1
+Input:
+eeee
+eee
+Output:
+9
+
+Explanation:
+We select the common subsequence 'eee'.
+
+Case 2
+Input:
+abcde
+ace
+Output:
+3
+          `.trim(),
+          targetLanguage: "cpp",
+          maxAttempts: 4,
+          imageAssets: [],
+        },
+        new MemoryLogger("test"),
+      );
+
+      expect(blueprint.detectedStyle).toBe("stdin_stdout");
+      expect(blueprint.suggestedSolveRequest).toBeDefined();
+      expect(blueprint.suggestedSolveRequest?.targetLanguage).toBe("cpp");
+      expect(blueprint.suggestedSolveRequest?.harness.tests).toHaveLength(2);
+      expect(blueprint.suggestedSolveRequest?.harness.tests[0]?.input).toEqual({
+        stdin: "eeee\neee",
+      });
+      expect(blueprint.suggestedSolveRequest?.harness.tests[0]?.expected).toBe("9");
+      expect(blueprint.suggestedSolveRequest?.instructions).toContain(
+        "Solve this as a stdin/stdout competitive-programming problem.",
+      );
+    } finally {
+      if (originalApiKey === undefined) {
+        delete process.env.OPENAI_API_KEY;
+      } else {
+        process.env.OPENAI_API_KEY = originalApiKey;
+      }
+    }
+  });
 });

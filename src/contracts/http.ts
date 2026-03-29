@@ -100,21 +100,32 @@ export function buildProblemFromHttpRequest(
     targetLanguage: request.targetLanguage,
     sampleCases: request.harness.tests
       .filter((testCase) => testCase.source === "sample")
-      .map((testCase) => ({
-        name: testCase.name,
-        input: JSON.stringify(testCase.input),
-        expectedOutput: JSON.stringify(testCase.expected),
-        source: testCase.source,
-      })),
+      .map(mapHarnessTestCaseToProblemCase),
     verificationCases: request.harness.tests
       .filter((testCase) => testCase.source !== "sample")
-      .map((testCase) => ({
-        name: testCase.name,
-        input: JSON.stringify(testCase.input),
-        expectedOutput: JSON.stringify(testCase.expected),
-        source: testCase.source,
-      })),
+      .map(mapHarnessTestCaseToProblemCase),
     constraints: [],
     imageAssets: request.imageAssets,
+  };
+}
+
+function mapHarnessTestCaseToProblemCase(
+  testCase: StreamedTestCase,
+): z.infer<typeof codingProblemSchema>["sampleCases"][number] {
+  const stdin =
+    typeof testCase.input.stdin === "string" &&
+    Object.keys(testCase.input).length === 1
+      ? testCase.input.stdin
+      : JSON.stringify(testCase.input);
+  const expectedOutput =
+    typeof testCase.expected === "string"
+      ? testCase.expected
+      : JSON.stringify(testCase.expected);
+
+  return {
+    name: testCase.name,
+    input: stdin,
+    expectedOutput,
+    source: testCase.source,
   };
 }

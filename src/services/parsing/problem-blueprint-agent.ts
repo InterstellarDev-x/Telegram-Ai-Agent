@@ -15,6 +15,8 @@ const FUNCTION_SIGNATURE_PATTERN =
   /function\s+([A-Za-z_]\w*)\s*\(([^)]*)\)\s*:\s*([^\n{]+)/i;
 const EXAMPLE_PATTERN =
   /Example\s+(\d+):\s*Input:\s*([\s\S]*?)\s*Output:\s*([\s\S]*?)(?=\n\s*Example\s+\d+:|\n\s*Constraints:|$)/gi;
+const CASE_PATTERN =
+  /Case\s+(\d+)\s*[\s\S]*?Input:\s*([\s\S]*?)\s*Output:\s*([\s\S]*?)(?=\n\s*Explanation:|\n\s*Case\s+\d+|\n\s*Constraints:|$)/gi;
 const MERGE_K_LISTS_PATTERN =
   /array of k linked-lists|merge all the linked-lists|merge k sorted lists/i;
 const LIST_NODE_PRELUDE = `
@@ -99,6 +101,24 @@ export async function parseRawQuestionToBlueprint(
 
   if (!apiKeyAvailable) {
     logger.warn("parser-fallback-no-openai-key");
+    const stdinSolveRequest = buildStdinStdoutSolveRequest(
+      request,
+      fallback,
+      fallback,
+      logger,
+    );
+    if (stdinSolveRequest) {
+      return {
+        ...fallback,
+        detectedStyle: "stdin_stdout",
+        notes: [
+          ...fallback.notes,
+          "Built suggested solve request via stdin/stdout sample parsing.",
+        ],
+        suggestedSolveRequest: stdinSolveRequest,
+      };
+    }
+
     const heuristicSolveRequest = buildHeuristicSolveRequest(
       request,
       fallback,
@@ -171,6 +191,24 @@ ${request.question}
       title: parsed.title,
       hasSuggestedSolveRequest: false,
     });
+
+    const stdinSolveRequest = buildStdinStdoutSolveRequest(
+      request,
+      parsed,
+      fallback,
+      logger,
+    );
+    if (stdinSolveRequest) {
+      return {
+        ...parsed,
+        detectedStyle: "stdin_stdout",
+        notes: [
+          ...parsed.notes,
+          "Built suggested solve request via stdin/stdout sample parsing.",
+        ],
+        suggestedSolveRequest: stdinSolveRequest,
+      };
+    }
 
     const inferredSolveRequest = await inferSolveRequestWithModel(
       model,
@@ -272,6 +310,24 @@ ${request.question}
           "Built suggested solve request via deterministic sample-based inference.",
         ],
         suggestedSolveRequest: heuristicSolveRequest,
+      };
+    }
+
+    const stdinSolveRequest = buildStdinStdoutSolveRequest(
+      request,
+      fallback,
+      fallback,
+      logger,
+    );
+    if (stdinSolveRequest) {
+      return {
+        ...fallback,
+        detectedStyle: "stdin_stdout",
+        notes: [
+          ...fallback.notes,
+          "Built suggested solve request via stdin/stdout sample parsing.",
+        ],
+        suggestedSolveRequest: stdinSolveRequest,
       };
     }
 
@@ -475,6 +531,79 @@ function buildHeuristicSolveRequest(
   return solveRequest;
 }
 
+function buildStdinStdoutSolveRequest(
+  request: RawQuestionRequest,
+  parsed: ParsedProblemBlueprint,
+  fallback: ParsedProblemBlueprint,
+  logger: Logger,
+): StreamedSolveRequest | undefined {
+  const extractedExamples =
+    parsed.extractedExamples.length > 0
+      ? parsed.extractedExamples
+      : fallback.extractedExamples;
+  if (extractedExamples.length === 0) {
+    return undefined;
+  }
+
+  const hasAssignmentStyleExamples = extractedExamples.some((example) =>
+    looksLikeAssignmentStyleInput(example.inputText),
+  );
+  if (hasAssignmentStyleExamples) {
+    return undefined;
+  }
+
+  const tests = extractedExamples
+    .map((example, index) => {
+      const stdin = normalizeStdinBlock(example.inputText);
+      const expectedOutput = normalizeExpectedOutput(example.outputText);
+      if (!stdin || !expectedOutput) {
+        return null;
+      }
+
+      return {
+        name: example.name || `case-${index + 1}`,
+        input: {
+          stdin,
+        },
+        expected: expectedOutput,
+        source: "sample" as const,
+      };
+    })
+    .filter((value): value is NonNullable<typeof value> => value !== null);
+
+  if (tests.length === 0 || !looksLikeCompetitiveProblem(parsed.normalizedStatement)) {
+    return undefined;
+  }
+
+  const solveRequest = streamedSolveRequestSchema.parse({
+    title: parsed.title,
+    statement: parsed.normalizedStatement,
+    targetLanguage: request.targetLanguage,
+    instructions: [
+      "Solve this as a stdin/stdout competitive-programming problem.",
+      "Read from standard input and write to standard output.",
+      "Use the parsed sample cases as examples of raw stdin and expected stdout.",
+      "If a starter template is visible in the screenshots, preserve it.",
+    ],
+    maxAttempts: request.maxAttempts,
+    harness: {
+      functionName: "solve",
+      functionSignature: "function solve(): void",
+      invokeExpression: "solve()",
+      assertionExpression: "true",
+      prelude: "",
+      tests,
+    },
+  });
+
+  logger.info("parser-stdin-solve-request-built", {
+    title: solveRequest.title,
+    tests: solveRequest.harness.tests.length,
+  });
+
+  return solveRequest;
+}
+
 function buildRegexFallback(
   request: RawQuestionRequest,
   logger: Logger,
@@ -661,9 +790,22 @@ function extractTitle(question: string): string {
 
 function extractExamples(question: string): ExtractedExample[] {
   const examples: ExtractedExample[] = [];
+  collectExamples(question, EXAMPLE_PATTERN, "example", examples);
+  collectExamples(question, CASE_PATTERN, "case", examples);
+
+  return examples;
+}
+
+function collectExamples(
+  question: string,
+  pattern: RegExp,
+  prefix: string,
+  examples: ExtractedExample[],
+): void {
+  const matcher = new RegExp(pattern.source, pattern.flags);
   let match: RegExpExecArray | null = null;
 
-  while ((match = EXAMPLE_PATTERN.exec(question)) !== null) {
+  while ((match = matcher.exec(question)) !== null) {
     const exampleNumber = match[1] ?? String(examples.length + 1);
     const inputText = match[2]?.trim() ?? "";
     const outputBlock = match[3]?.trim() ?? "";
@@ -674,13 +816,11 @@ function extractExamples(question: string): ExtractedExample[] {
     }
 
     examples.push({
-      name: `example-${exampleNumber}`,
+      name: `${prefix}-${exampleNumber}`,
       inputText,
       outputText,
     });
   }
-
-  return examples;
 }
 
 function extractParameterNames(functionSignature: string): string[] {
@@ -704,7 +844,12 @@ function parseExampleInput(inputText: string): Record<string, unknown> | null {
     .filter(Boolean);
 
   if (assignments.length === 0) {
-    return null;
+    const stdin = normalizeStdinBlock(inputText);
+    return stdin
+      ? {
+          stdin,
+        }
+      : null;
   }
 
   const result: Record<string, unknown> = {};
@@ -725,6 +870,36 @@ function parseExampleInput(inputText: string): Record<string, unknown> | null {
   }
 
   return result;
+}
+
+function normalizeStdinBlock(inputText: string): string {
+  const normalized = inputText
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n")
+    .trim();
+
+  return normalized;
+}
+
+function normalizeExpectedOutput(outputText: string): string {
+  return outputText
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.trim())
+    .join("\n")
+    .trim();
+}
+
+function looksLikeCompetitiveProblem(question: string): boolean {
+  return /input format|sample test cases|\bcase\s+\d+\b|constraints/i.test(
+    question,
+  );
+}
+
+function looksLikeAssignmentStyleInput(inputText: string): boolean {
+  return /[A-Za-z_]\w*\s*=\s*/.test(inputText);
 }
 
 function parseLiteral(valueText: string): unknown {
