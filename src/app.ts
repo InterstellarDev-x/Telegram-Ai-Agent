@@ -41,6 +41,7 @@ export async function handleHttpRequest(request: Request): Promise<Response> {
           "https://pure-rabbit-71049.upstash.io",
       ),
       openAiConfigured: Boolean(process.env.OPENAI_API_KEY),
+      geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
     });
   }
 
