@@ -35,6 +35,7 @@ export function buildProblemFromRawText({
     verificationCases,
     constraints,
     imageAssets: [],
+    extractionWarnings: [],
   };
 }
 

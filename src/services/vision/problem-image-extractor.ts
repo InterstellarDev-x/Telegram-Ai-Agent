@@ -4,8 +4,13 @@ import type { Logger } from "../../utils/logger.js";
 
 const extractedImageProblemSchema = z.object({
   questionText: z.string(),
+  starterTemplateText: z.string().default(""),
   readability: z.enum(["clear", "unclear"]),
   coverage: z.enum(["complete", "partial"]),
+  imageKind: z
+    .enum(["statement", "template", "mixed", "unknown"])
+    .default("unknown"),
+  visibleSections: z.array(z.string()).default([]),
   issues: z.array(z.string()).default([]),
 });
 
@@ -17,8 +22,11 @@ export interface ProblemImageExtractionInput {
 
 export interface ProblemImageExtractionResult {
   questionText: string;
+  starterTemplateText: string;
   readability: "clear" | "unclear";
   coverage: "complete" | "partial";
+  imageKind: "statement" | "template" | "mixed" | "unknown";
+  visibleSections: string[];
   issues: string[];
 }
 
@@ -44,8 +52,11 @@ You extract coding problem statements from images for a backend solver.
 
 Return a JSON object with these fields:
 - questionText: the visible coding problem text reconstructed from this image only
+- starterTemplateText: starter code, predefined signature, class skeleton, or editor-visible boilerplate from this image only
 - readability: "clear" if the text is readable enough to trust, otherwise "unclear"
 - coverage: "complete" if this image appears to contain the whole problem, otherwise "partial"
+- imageKind: "statement", "template", "mixed", or "unknown"
+- visibleSections: short labels such as "title", "statement", "input format", "constraints", "sample tests", "template"
 - issues: short reasons if the image is blurry, cropped, obscured, or otherwise hard to read
 
 Rules:
@@ -55,9 +66,10 @@ Rules:
 - These are often competitive-programming problems, including hard and very hard ones where constraints are critical to the intended algorithm.
 - Preserve constraints, bounds, notes, and explanation text very carefully because they may determine whether an O(n^2), O(n log n), DP, graph, greedy, or math solution is valid.
 - These screenshots may show the problem statement on one side and a code editor or boilerplate template on the other side.
-- If a code editor, starter template, function signature, or class skeleton is visible, include it under the reconstructed text instead of ignoring it.
+- If a code editor, starter template, function signature, or class skeleton is visible, extract it into starterTemplateText instead of mixing it into questionText.
 - Ignore editor chrome, line numbers, tabs, sidebars, cursors, scrollbars, and UI labels unless they are part of the actual problem or starter code.
 - Do not confuse sample-case labels, explanations, or template code with website UI text.
+- questionText should contain only actual problem content. starterTemplateText should contain only the required code/template content.
 - Normalize broken OCR whitespace only when needed for readability, but do not invent missing sections.
 - Do not explain anything.
 - Do not wrap the result in markdown.
@@ -89,9 +101,20 @@ Rules:
           schema: {
               type: "object",
               additionalProperties: false,
-              required: ["questionText", "readability", "coverage", "issues"],
+              required: [
+                "questionText",
+                "starterTemplateText",
+                "readability",
+                "coverage",
+                "imageKind",
+                "visibleSections",
+                "issues",
+              ],
               properties: {
                 questionText: {
+                  type: "string",
+                },
+                starterTemplateText: {
                   type: "string",
                 },
                 readability: {
@@ -101,6 +124,16 @@ Rules:
                 coverage: {
                   type: "string",
                   enum: ["complete", "partial"],
+                },
+                imageKind: {
+                  type: "string",
+                  enum: ["statement", "template", "mixed", "unknown"],
+                },
+                visibleSections: {
+                  type: "array",
+                  items: {
+                    type: "string",
+                  },
                 },
                 issues: {
                   type: "array",
@@ -126,8 +159,11 @@ Rules:
 
     return {
       questionText: parsed.questionText.trim(),
+      starterTemplateText: parsed.starterTemplateText.trim(),
       readability: parsed.readability,
       coverage: parsed.coverage,
+      imageKind: parsed.imageKind,
+      visibleSections: parsed.visibleSections,
       issues: parsed.issues,
     };
   }

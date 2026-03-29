@@ -164,6 +164,7 @@ Constraints:
     verificationCases: [],
     constraints: [],
     imageAssets: [],
+    extractionWarnings: [],
   };
 }
 

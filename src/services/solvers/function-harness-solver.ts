@@ -47,6 +47,15 @@ class ImageAwareCodeTestingAgent implements CodeTestingAgent {
       imageAssets: input.problem.imageAssets.length,
     });
 
+    const deterministicGuardrailReport = runDeterministicVerificationGuards(input);
+    if (deterministicGuardrailReport) {
+      this.logger.warn("deterministic-verification-failed", {
+        attempt: input.attempt,
+        verdict: deterministicGuardrailReport.verdict,
+      });
+      return deterministicGuardrailReport;
+    }
+
     const client = createOpenAIClient();
     const content: Array<
       | { type: "input_text"; text: string }
@@ -292,6 +301,10 @@ function buildVerificationPrompt(input: TestSolutionInput): string {
     input.attempt <= 1
       ? "No previous verifier feedback."
       : "This is a retry after previous verification feedback. Focus on whether the current code fixes the earlier issues and fully matches the screenshots.";
+  const extractionWarnings =
+    input.problem.extractionWarnings.length === 0
+      ? "No extraction warnings."
+      : input.problem.extractionWarnings.map((warning) => `- ${warning}`).join("\n");
 
   return `
 Attempt: ${input.attempt}
@@ -306,6 +319,9 @@ ${input.problem.statement}
 Parsed sample cases:
 ${sampleCases}
 
+Extraction warnings:
+${extractionWarnings}
+
 Candidate code:
 ${input.candidate.code}
 
@@ -316,4 +332,160 @@ Decide whether this code is correct for the coding problem shown in the attached
 If the screenshots include starter code, required function/class names, or sample tests, evaluate against those exact requirements.
 Ignore website/editor chrome and focus only on the actual problem content and template code shown in the screenshots.
   `.trim();
+}
+
+function runDeterministicVerificationGuards(
+  input: TestSolutionInput,
+): TestingReport | null {
+  const template = extractStarterTemplate(input.problem.statement);
+  const complexityMismatch = detectComplexityMismatch(
+    input.problem.statement,
+    input.problem.constraints,
+    input.candidate.complexity,
+  );
+  if (complexityMismatch) {
+    return {
+      status: "failed",
+      verdict: complexityMismatch,
+      executedCases: [],
+      feedback: {
+        summary: complexityMismatch,
+        rootCause: complexityMismatch,
+        actionItems: [
+          "Choose an algorithm whose complexity matches the visible constraints.",
+          "Explain the intended asymptotic complexity clearly and ensure the code implements that approach.",
+        ],
+        failingCases: [],
+      },
+    };
+  }
+
+  const interfaceMismatch = detectInterfaceMismatch(
+    input.problem.statement,
+    template,
+    input.problem.targetLanguage,
+    input.candidate.code,
+  );
+  if (interfaceMismatch) {
+    return {
+      status: "failed",
+      verdict: interfaceMismatch,
+      executedCases: [],
+      feedback: {
+        summary: interfaceMismatch,
+        rootCause: interfaceMismatch,
+        actionItems: [
+          "Preserve the required interface or starter template visible in the statement or screenshots.",
+          "For stdin/stdout problems in C++, provide a complete program with int main unless a template explicitly replaces it.",
+        ],
+        failingCases: [],
+      },
+    };
+  }
+
+  return null;
+}
+
+function detectComplexityMismatch(
+  statement: string,
+  constraints: string[],
+  complexity: string,
+): string | null {
+  const source = `${statement}\n${constraints.join("\n")}`;
+  const maxMagnitude = extractMaxConstraintMagnitude(source);
+  const normalizedComplexity = complexity.toLowerCase();
+
+  if (
+    maxMagnitude >= 100_000 &&
+    /(quadratic|o\s*\(\s*n\s*\^\s*2\s*\)|o\s*\(\s*n\s*\*\s*n\s*\)|n\^2)/i.test(
+      normalizedComplexity,
+    )
+  ) {
+    return "The claimed algorithmic complexity looks too slow for the visible constraints.";
+  }
+
+  if (
+    maxMagnitude >= 1_000 &&
+    /(exponential|2\^n|o\s*\(\s*2\^n\s*\)|factorial)/i.test(
+      normalizedComplexity,
+    )
+  ) {
+    return "The claimed complexity is exponential and does not fit the visible constraints.";
+  }
+
+  return null;
+}
+
+function detectInterfaceMismatch(
+  statement: string,
+  template: string,
+  targetLanguage: string,
+  code: string,
+): string | null {
+  const requiredClassNames = Array.from(
+    template.matchAll(/\bclass\s+([A-Za-z_]\w*)/g),
+    (match) => match[1],
+  );
+  for (const className of requiredClassNames) {
+    if (!new RegExp(`\\bclass\\s+${className}\\b`).test(code)) {
+      return `The candidate does not preserve the required class ${className}.`;
+    }
+  }
+
+  const requiredFunctionNames = Array.from(
+    template.matchAll(
+      /\b(?:int|long long|double|bool|string|void|vector<[^>]+>|map<[^>]+>|set<[^>]+>|unordered_map<[^>]+>|unordered_set<[^>]+>|auto)\s+([A-Za-z_]\w*)\s*\(/g,
+    ),
+    (match) => match[1],
+  ).filter((name) => name !== "main");
+
+  for (const functionName of requiredFunctionNames) {
+    if (!new RegExp(`\\b${functionName}\\s*\\(`).test(code)) {
+      return `The candidate does not preserve the required function ${functionName}.`;
+    }
+  }
+
+  const looksLikeStdinStdout = /input format|sample test cases|output format|output:/i.test(
+    statement,
+  );
+  if (
+    targetLanguage === "cpp" &&
+    looksLikeStdinStdout &&
+    !template &&
+    !/\bint\s+main\s*\(/.test(code)
+  ) {
+    return "The candidate does not provide a complete C++ stdin/stdout program with int main.";
+  }
+
+  return null;
+}
+
+function extractStarterTemplate(statement: string): string {
+  const marker = "\nStarter Template:\n";
+  const markerIndex = statement.indexOf(marker);
+  if (markerIndex < 0) {
+    return "";
+  }
+
+  return statement.slice(markerIndex + marker.length).trim();
+}
+
+function extractMaxConstraintMagnitude(source: string): number {
+  let max = 0;
+
+  for (const match of source.matchAll(/\b10\^(\d+)\b/g)) {
+    const exponent = Number(match[1]);
+    if (Number.isFinite(exponent)) {
+      max = Math.max(max, 10 ** Math.min(exponent, 12));
+    }
+  }
+
+  for (const match of source.matchAll(/\b\d[\d,]*\b/g)) {
+    const parsed = Number(match[0].replaceAll(",", ""));
+    if (Number.isFinite(parsed)) {
+      max = Math.max(max, parsed);
+    }
+  }
+
+  return max;
 }

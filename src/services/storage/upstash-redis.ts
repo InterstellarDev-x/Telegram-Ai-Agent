@@ -1,7 +1,3 @@
-const DEFAULT_UPSTASH_REDIS_REST_URL = "https://pure-rabbit-71049.upstash.io";
-const DEFAULT_UPSTASH_REDIS_REST_TOKEN =
-  "gQAAAAAAARWJAAIncDJlMTViNjA5NjY5NTE0YzhhYTQyYmJlYzdiNDNlMDVlMXAyNzEwNDk";
-
 interface UpstashResult<TValue> {
   result: TValue;
 }
@@ -25,6 +21,19 @@ export class UpstashRedisClient {
     }
 
     await this.execute(command);
+  }
+
+  async getJson<TValue>(key: string): Promise<TValue | null> {
+    const raw = await this.get(key);
+    if (!raw) {
+      return null;
+    }
+
+    return JSON.parse(raw) as TValue;
+  }
+
+  async setJson<TValue>(key: string, value: TValue, ttlSeconds?: number): Promise<void> {
+    await this.set(key, JSON.stringify(value), ttlSeconds);
   }
 
   async del(key: string): Promise<void> {
@@ -51,10 +60,8 @@ export class UpstashRedisClient {
 }
 
 export function createUpstashRedisClient(): UpstashRedisClient {
-  const baseUrl =
-    process.env.UPSTASH_REDIS_REST_URL ?? DEFAULT_UPSTASH_REDIS_REST_URL;
-  const token =
-    process.env.UPSTASH_REDIS_REST_TOKEN ?? DEFAULT_UPSTASH_REDIS_REST_TOKEN;
+  const baseUrl = process.env.UPSTASH_REDIS_REST_URL?.trim();
+  const token = process.env.UPSTASH_REDIS_REST_TOKEN?.trim();
 
   if (!baseUrl || !token) {
     throw new Error("Upstash Redis credentials are required.");

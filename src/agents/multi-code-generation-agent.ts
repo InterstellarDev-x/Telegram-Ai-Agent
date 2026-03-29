@@ -52,6 +52,12 @@ export class MultiCodeGenerationAgent implements CodeGenerationAgent {
       );
     }
 
+    this.logger.info("generation-candidates-ready", {
+      attempt: input.attempt,
+      providers: candidates.map((candidate) => candidate.provider ?? "unknown"),
+      count: candidates.length,
+    });
+
     if (failures.length > 0) {
       this.logger.warn("multi-generator-partial-failure", {
         failures,

@@ -128,6 +128,10 @@ code:
 ${candidate.code}`,
           )
           .join("\n\n");
+  const extractionWarnings =
+    input.problem.extractionWarnings.length === 0
+      ? "No extraction warnings."
+      : input.problem.extractionWarnings.map((warning) => `- ${warning}`).join("\n");
 
   return `
 Attempt: ${input.attempt}
@@ -143,6 +147,9 @@ Problem images attached to verifier: ${input.problem.imageAssets.length}
 
 Known sample tests:
 ${JSON.stringify(input.problem.sampleCases, null, 2)}
+
+Extraction warnings:
+${extractionWarnings}
 
 Prior failed code:
 ${priorCodeBlock}

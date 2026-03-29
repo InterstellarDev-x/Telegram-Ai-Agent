@@ -33,6 +33,8 @@ export const streamedSolveRequestSchema = z.object({
   maxAttempts: z.number().int().positive().max(10).default(4),
   harness: functionHarnessSchema,
   imageAssets: z.array(problemImageAssetSchema).default([]),
+  extractionWarnings: z.array(z.string()).default([]),
+  artifactId: z.string().optional(),
 });
 
 export type StreamedSolveRequest = z.infer<typeof streamedSolveRequestSchema>;
@@ -42,6 +44,8 @@ export const rawQuestionRequestSchema = z.object({
   targetLanguage: z.enum(supportedLanguages).default("cpp"),
   maxAttempts: z.number().int().positive().max(10).default(4),
   imageAssets: z.array(problemImageAssetSchema).default([]),
+  extractionWarnings: z.array(z.string()).default([]),
+  artifactId: z.string().optional(),
 });
 
 export type RawQuestionRequest = z.infer<typeof rawQuestionRequestSchema>;
@@ -64,6 +68,7 @@ export const parsedProblemBlueprintSchema = z.object({
   notes: z.array(z.string()).default([]),
   extractedExamples: z.array(extractedExampleSchema).default([]),
   suggestedSolveRequest: streamedSolveRequestSchema.optional(),
+  alternateSolveRequests: z.array(streamedSolveRequestSchema).default([]),
 });
 
 export type ParsedProblemBlueprint = z.infer<typeof parsedProblemBlueprintSchema>;
@@ -106,6 +111,8 @@ export function buildProblemFromHttpRequest(
       .map(mapHarnessTestCaseToProblemCase),
     constraints: [],
     imageAssets: request.imageAssets,
+    extractionWarnings: request.extractionWarnings,
+    artifactId: request.artifactId,
   };
 }
 

@@ -12,6 +12,7 @@ import {
 } from "../vision/problem-image-extractor.js";
 import type { ProblemImageAsset } from "../../contracts/problem.js";
 import { CallbackLogger, type LogEntry, type Logger } from "../../utils/logger.js";
+import { solveArtifactStore } from "../storage/solve-artifact-store.js";
 import {
   createTelegramBotClient,
   type TelegramBotClient,
@@ -142,6 +143,7 @@ async function processCollectedImages(
 ): Promise<void> {
   const chatId = message.chat.id;
   const session = await telegramSessionStore.get(chatId);
+  const artifactId = crypto.randomUUID();
   const workflow = createTelegramWorkflowMessenger(client, chatId, message.message_id);
   const workflowLogger = new CallbackLogger("telegram-workflow", (entry) => {
     console.log(JSON.stringify(entry));
@@ -154,17 +156,59 @@ async function processCollectedImages(
       `Processing ${session.images.length} queued image(s). Extracting the coding problem first.`,
     );
 
-    const rawQuestionRequest = await buildRawQuestionRequestFromImages(
+    const rawQuestionPayload = await buildRawQuestionRequestFromImages(
       session.images,
       workflowLogger.child("ingress"),
       client,
+      artifactId,
     );
+    const rawQuestionRequest = rawQuestionPayload.request;
+
+    await solveArtifactStore.put({
+      id: artifactId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      stage: "ingested",
+      chatId,
+      targetLanguage: rawQuestionRequest.targetLanguage,
+      extraction: {
+        imageCount: session.images.length,
+        warnings: rawQuestionPayload.warnings,
+        segmentKinds: rawQuestionPayload.segmentKinds,
+        normalizedQuestion: rawQuestionRequest.question,
+      },
+    });
 
     await workflow.send(
       "Question received. Parsing the problem and preparing the verification harness.",
     );
 
     const outcome = await solveRawQuestion(rawQuestionRequest, workflowLogger.child("solver"));
+
+    await solveArtifactStore.patch(artifactId, {
+      stage: outcome.result.status === "passed" ? "solved" : "failed",
+      title: outcome.blueprint.title,
+      parse: {
+        detectedStyle: outcome.blueprint.detectedStyle,
+        notes: outcome.blueprint.notes,
+        alternateSolveRequests: outcome.blueprint.alternateSolveRequests.length,
+      },
+      solve: {
+        status: outcome.result.status,
+        attemptsUsed: outcome.result.attemptsUsed,
+        providers: outcome.result.transcript
+          .filter((entry) => entry.type === "generation.response")
+          .map((entry) =>
+            typeof entry.payload === "object" &&
+            entry.payload &&
+            "provider" in entry.payload &&
+            typeof entry.payload.provider === "string"
+              ? entry.payload.provider
+              : "unknown",
+          ),
+        verdict: outcome.result.finalReport.verdict,
+      },
+    });
 
     if (outcome.result.status !== "passed" || !outcome.result.finalCandidate) {
       throw new Error("The solver could not verify a final solution.");
@@ -185,6 +229,12 @@ async function processCollectedImages(
     logger.error("telegram-update-failed", {
       updateId: update.update_id,
       reason: error instanceof Error ? error.message : "unknown-error",
+      chatId,
+      artifactId,
+    });
+
+    await solveArtifactStore.patch(artifactId, {
+      stage: "failed",
     });
 
     if (error instanceof UnclearImagesError) {
@@ -208,7 +258,12 @@ async function buildRawQuestionRequestFromImages(
   images: PendingTelegramImage[],
   logger: Logger,
   client: TelegramBotClient,
-): Promise<RawQuestionRequest> {
+  artifactId: string,
+): Promise<{
+  request: RawQuestionRequest;
+  warnings: string[];
+  segmentKinds: string[];
+}> {
   const extractor = new ProblemImageExtractor(logger.child("image-extractor"));
   const extractedSegments: ProblemImageExtractionResult[] = [];
   const imageAssets: ProblemImageAsset[] = [];
@@ -265,7 +320,13 @@ async function buildRawQuestionRequestFromImages(
     );
   }
 
+  const warnings = extractImageWarnings(extractedSegments);
   const question = combineExtractedProblemText(extractedSegments);
+  logger.info("image-segments-normalized", {
+    imageCount: images.length,
+    segmentKinds: extractedSegments.map((segment) => segment.imageKind),
+    warningCount: warnings.length,
+  });
   if (question.length < 40) {
     throw new UnclearImagesError(
       "The extracted text was too short to reconstruct the full coding problem.",
@@ -273,10 +334,16 @@ async function buildRawQuestionRequestFromImages(
   }
 
   return {
-    question,
-    targetLanguage: "cpp",
-    maxAttempts: 4,
-    imageAssets,
+    request: {
+      question,
+      targetLanguage: "cpp",
+      maxAttempts: 4,
+      imageAssets,
+      extractionWarnings: warnings,
+      artifactId,
+    },
+    warnings,
+    segmentKinds: extractedSegments.map((segment) => segment.imageKind),
   };
 }
 
@@ -336,25 +403,34 @@ function buildPendingImage(message: TelegramMessage): PendingTelegramImage | nul
 function combineExtractedProblemText(
   extractedSegments: ProblemImageExtractionResult[],
 ): string {
-  const seen = new Set<string>();
-  const parts: string[] = [];
+  const seenBlocks = new Set<string>();
+  const statementParts: string[] = [];
+  const templateParts: string[] = [];
 
-  for (const segment of extractedSegments) {
-    const normalized = segment.questionText.trim();
-    if (!normalized) {
-      continue;
+  const orderedSegments = [...extractedSegments].sort((left, right) => {
+    return rankImageKind(left.imageKind) - rankImageKind(right.imageKind);
+  });
+
+  for (const segment of orderedSegments) {
+    const normalizedQuestion = normalizeExtractedBlock(segment.questionText);
+    const normalizedTemplate = normalizeExtractedBlock(segment.starterTemplateText);
+
+    if (normalizedQuestion) {
+      pushUniqueMergedBlock(statementParts, seenBlocks, normalizedQuestion);
     }
 
-    const dedupeKey = normalized.replace(/\s+/g, " ").toLowerCase();
-    if (seen.has(dedupeKey)) {
-      continue;
+    if (normalizedTemplate) {
+      pushUniqueMergedBlock(templateParts, seenBlocks, normalizedTemplate);
     }
-
-    seen.add(dedupeKey);
-    parts.push(normalized);
   }
 
-  return parts.join("\n\n");
+  const mergedStatement = statementParts.join("\n\n").trim();
+  const mergedTemplate = templateParts.join("\n\n").trim();
+  if (!mergedTemplate) {
+    return mergedStatement;
+  }
+
+  return `${mergedStatement}\n\nStarter Template:\n${mergedTemplate}`.trim();
 }
 
 function inferImageMimeType(filePath?: string, fallback?: string): string {
@@ -445,8 +521,17 @@ function mapLogEntryToTelegramMessage(entry: LogEntry): string | null {
       return "Recognized the problem format and built a deterministic solve request.";
     case "parser-agent-started":
       return "Parsing the extracted text into structured problem JSON.";
+    case "image-segments-normalized":
+      return "Merged the extracted screenshots into one normalized problem packet.";
+    case "generation-candidates-ready":
+      if (Array.isArray(entry.data?.providers) && entry.data.providers.length > 0) {
+        return `Candidate sources: ${entry.data.providers.join(", ")}.`;
+      }
+      return null;
     case "generation-started":
       return `Generating solution candidate${attempt ? ` (attempt ${attempt})` : ""}.`;
+    case "deterministic-verification-failed":
+      return `Rejected a candidate before full verification${attempt ? ` on attempt ${attempt}` : ""}.`;
     case "testing-started":
       return `Running verifier tests${attempt ? ` for attempt ${attempt}` : ""}.`;
     case "testing-failed":
@@ -462,4 +547,100 @@ function mapLogEntryToTelegramMessage(entry: LogEntry): string | null {
     default:
       return null;
   }
+}
+
+function extractImageWarnings(
+  extractedSegments: ProblemImageExtractionResult[],
+): string[] {
+  return Array.from(
+    new Set(
+      extractedSegments
+        .flatMap((segment) => segment.issues)
+        .map((issue) => issue.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function rankImageKind(kind: ProblemImageExtractionResult["imageKind"]): number {
+  switch (kind) {
+    case "statement":
+      return 0;
+    case "mixed":
+      return 1;
+    case "template":
+      return 2;
+    default:
+      return 3;
+  }
+}
+
+function pushUniqueMergedBlock(
+  blocks: string[],
+  seenBlocks: Set<string>,
+  nextBlock: string,
+): void {
+  const key = nextBlock.replace(/\s+/g, " ").toLowerCase();
+  if (seenBlocks.has(key)) {
+    return;
+  }
+
+  const previous = blocks[blocks.length - 1];
+  if (previous) {
+    const merged = mergeOverlappingBlocks(previous, nextBlock);
+    if (merged !== null) {
+      seenBlocks.delete(previous.replace(/\s+/g, " ").toLowerCase());
+      blocks[blocks.length - 1] = merged;
+      seenBlocks.add(merged.replace(/\s+/g, " ").toLowerCase());
+      return;
+    }
+  }
+
+  blocks.push(nextBlock);
+  seenBlocks.add(key);
+}
+
+function mergeOverlappingBlocks(left: string, right: string): string | null {
+  if (!left || !right) {
+    return null;
+  }
+
+  if (left.includes(right)) {
+    return left;
+  }
+
+  if (right.includes(left)) {
+    return right;
+  }
+
+  const leftLines = left.split("\n");
+  const rightLines = right.split("\n");
+  const maxOverlap = Math.min(leftLines.length, rightLines.length, 12);
+
+  for (let overlap = maxOverlap; overlap >= 2; overlap -= 1) {
+    const leftSuffix = leftLines.slice(-overlap).join("\n").trim().toLowerCase();
+    const rightPrefix = rightLines.slice(0, overlap).join("\n").trim().toLowerCase();
+    if (leftSuffix && leftSuffix === rightPrefix) {
+      return [...leftLines, ...rightLines.slice(overlap)].join("\n").trim();
+    }
+  }
+
+  return null;
+}
+
+function normalizeExtractedBlock(text: string): string {
+  return text
+    .replace(/\u0000rst\b/gi, "first")
+    .replace(/\u0000nal\b/gi, "final")
+    .replace(/\u0000/g, "")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[–—]/g, "-")
+    .replace(/\b10\s*\^\s*(\d+)\b/g, "10^$1")
+    .replace(/\r/g, "")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter((line, index, lines) => line.length > 0 || (index > 0 && lines[index - 1] !== ""))
+    .join("\n")
+    .trim();
 }

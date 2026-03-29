@@ -107,6 +107,12 @@ export async function parseRawQuestionToBlueprint(
       fallback,
       logger,
     );
+    const heuristicSolveRequest = buildHeuristicSolveRequest(
+      request,
+      fallback,
+      fallback,
+      logger,
+    );
     if (stdinSolveRequest) {
       return {
         ...fallback,
@@ -116,15 +122,10 @@ export async function parseRawQuestionToBlueprint(
           "Built suggested solve request via stdin/stdout sample parsing.",
         ],
         suggestedSolveRequest: stdinSolveRequest,
+        alternateSolveRequests: dedupeSolveRequests([heuristicSolveRequest]),
       };
     }
 
-    const heuristicSolveRequest = buildHeuristicSolveRequest(
-      request,
-      fallback,
-      fallback,
-      logger,
-    );
     if (heuristicSolveRequest) {
       return {
         ...fallback,
@@ -136,6 +137,7 @@ export async function parseRawQuestionToBlueprint(
           "Built suggested solve request via deterministic sample-based inference.",
         ],
         suggestedSolveRequest: heuristicSolveRequest,
+        alternateSolveRequests: dedupeSolveRequests([stdinSolveRequest]),
       };
     }
 
@@ -198,6 +200,12 @@ ${request.question}
       fallback,
       logger,
     );
+    const heuristicSolveRequest = buildHeuristicSolveRequest(
+      request,
+      parsed,
+      fallback,
+      logger,
+    );
     if (stdinSolveRequest) {
       return {
         ...parsed,
@@ -207,6 +215,10 @@ ${request.question}
           "Built suggested solve request via stdin/stdout sample parsing.",
         ],
         suggestedSolveRequest: stdinSolveRequest,
+        alternateSolveRequests: dedupeSolveRequests([
+          heuristicSolveRequest,
+          fallback.suggestedSolveRequest,
+        ]),
       };
     }
 
@@ -234,15 +246,14 @@ ${request.question}
           "Built suggested solve request via model inference from OCR/raw text.",
         ],
         suggestedSolveRequest: inferredSolveRequest,
+        alternateSolveRequests: dedupeSolveRequests([
+          heuristicSolveRequest,
+          stdinSolveRequest,
+          fallback.suggestedSolveRequest,
+        ]),
       };
     }
 
-    const heuristicSolveRequest = buildHeuristicSolveRequest(
-      request,
-      parsed,
-      fallback,
-      logger,
-    );
     if (heuristicSolveRequest) {
       return {
         ...parsed,
@@ -254,6 +265,10 @@ ${request.question}
           "Built suggested solve request via deterministic sample-based inference.",
         ],
         suggestedSolveRequest: heuristicSolveRequest,
+        alternateSolveRequests: dedupeSolveRequests([
+          stdinSolveRequest,
+          fallback.suggestedSolveRequest,
+        ]),
       };
     }
 
@@ -262,6 +277,7 @@ ${request.question}
         ...parsed,
         suggestedSolveRequest: fallback.suggestedSolveRequest,
         notes: [...parsed.notes, "Used regex fallback suggested solve request."],
+        alternateSolveRequests: dedupeSolveRequests([stdinSolveRequest]),
       };
     }
 
@@ -273,6 +289,18 @@ ${request.question}
 
     const inferredSolveRequest = await inferSolveRequestWithModel(
       model,
+      request,
+      fallback,
+      fallback,
+      logger,
+    );
+    const heuristicSolveRequest = buildHeuristicSolveRequest(
+      request,
+      fallback,
+      fallback,
+      logger,
+    );
+    const stdinSolveRequest = buildStdinStdoutSolveRequest(
       request,
       fallback,
       fallback,
@@ -290,15 +318,13 @@ ${request.question}
           "Built suggested solve request via model inference after parser fallback.",
         ],
         suggestedSolveRequest: inferredSolveRequest,
+        alternateSolveRequests: dedupeSolveRequests([
+          heuristicSolveRequest,
+          stdinSolveRequest,
+        ]),
       };
     }
 
-    const heuristicSolveRequest = buildHeuristicSolveRequest(
-      request,
-      fallback,
-      fallback,
-      logger,
-    );
     if (heuristicSolveRequest) {
       return {
         ...fallback,
@@ -310,15 +336,10 @@ ${request.question}
           "Built suggested solve request via deterministic sample-based inference.",
         ],
         suggestedSolveRequest: heuristicSolveRequest,
+        alternateSolveRequests: dedupeSolveRequests([stdinSolveRequest]),
       };
     }
 
-    const stdinSolveRequest = buildStdinStdoutSolveRequest(
-      request,
-      fallback,
-      fallback,
-      logger,
-    );
     if (stdinSolveRequest) {
       return {
         ...fallback,
@@ -328,6 +349,7 @@ ${request.question}
           "Built suggested solve request via stdin/stdout sample parsing.",
         ],
         suggestedSolveRequest: stdinSolveRequest,
+        alternateSolveRequests: [],
       };
     }
 
@@ -604,6 +626,35 @@ function buildStdinStdoutSolveRequest(
   return solveRequest;
 }
 
+function dedupeSolveRequests(
+  requests: Array<StreamedSolveRequest | undefined>,
+): StreamedSolveRequest[] {
+  const seen = new Set<string>();
+  const deduped: StreamedSolveRequest[] = [];
+
+  for (const request of requests) {
+    if (!request) {
+      continue;
+    }
+
+    const key = JSON.stringify({
+      title: request.title,
+      statement: request.statement,
+      targetLanguage: request.targetLanguage,
+      signature: request.harness.functionSignature,
+      tests: request.harness.tests,
+    });
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(request);
+  }
+
+  return deduped;
+}
+
 function buildRegexFallback(
   request: RawQuestionRequest,
   logger: Logger,
@@ -690,6 +741,7 @@ function buildRegexFallback(
       : ["Could not build a solve request confidently from regex extraction."],
     extractedExamples,
     suggestedSolveRequest,
+    alternateSolveRequests: [],
   };
 }
 
@@ -773,6 +825,7 @@ function buildKnownProblemTemplate(
       ],
       extractedExamples,
       suggestedSolveRequest,
+      alternateSolveRequests: [],
     };
   }
 

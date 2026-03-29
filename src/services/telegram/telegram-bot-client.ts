@@ -6,8 +6,6 @@ import type { Logger } from "../../utils/logger.js";
 
 const TELEGRAM_API_BASE = "https://api.telegram.org";
 const TELEGRAM_MAX_MESSAGE_LENGTH = 4096;
-const DEFAULT_DEV_TELEGRAM_BOT_TOKEN =
-  "8599626908:AAFXItwarN2ZkvXQGiPbwX9xami2tLmHZv8";
 
 export interface TelegramSendMessageOptions {
   parseMode?: "HTML";
@@ -145,7 +143,7 @@ export class TelegramBotClient {
 }
 
 export function resolveTelegramBotToken(): string | undefined {
-  return process.env.TELEGRAM_BOT_TOKEN ?? DEFAULT_DEV_TELEGRAM_BOT_TOKEN;
+  return process.env.TELEGRAM_BOT_TOKEN?.trim();
 }
 
 export function createTelegramBotClient(logger: Logger): TelegramBotClient {

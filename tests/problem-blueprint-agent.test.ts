@@ -33,6 +33,7 @@ Output: true
           targetLanguage: "typescript",
           maxAttempts: 4,
           imageAssets: [],
+          extractionWarnings: [],
         },
         new MemoryLogger("test"),
       );
@@ -102,6 +103,7 @@ Output:
           targetLanguage: "cpp",
           maxAttempts: 4,
           imageAssets: [],
+          extractionWarnings: [],
         },
         new MemoryLogger("test"),
       );

@@ -32,13 +32,10 @@ export async function handleHttpRequest(request: Request): Promise<Response> {
       ok: true,
       timestamp: new Date().toISOString(),
       webhookPath: "/telegram/webhook",
-      telegramBotConfigured: Boolean(
-        process.env.TELEGRAM_BOT_TOKEN ??
-          "8599626908:AAFXItwarN2ZkvXQGiPbwX9xami2tLmHZv8",
-      ),
+      telegramBotConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN?.trim()),
       upstashConfigured: Boolean(
-        process.env.UPSTASH_REDIS_REST_URL ??
-          "https://pure-rabbit-71049.upstash.io",
+        process.env.UPSTASH_REDIS_REST_URL?.trim() &&
+          process.env.UPSTASH_REDIS_REST_TOKEN?.trim(),
       ),
       openAiConfigured: Boolean(process.env.OPENAI_API_KEY),
       geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
@@ -126,9 +123,7 @@ async function handleParseProblem(request: Request): Promise<Response> {
 
 async function handleTelegramWebhook(request: Request): Promise<Response> {
   try {
-    const telegramBotToken =
-      process.env.TELEGRAM_BOT_TOKEN ??
-      "8599626908:AAFXItwarN2ZkvXQGiPbwX9xami2tLmHZv8";
+    const telegramBotToken = process.env.TELEGRAM_BOT_TOKEN?.trim();
 
     if (!telegramBotToken) {
       return jsonResponse(

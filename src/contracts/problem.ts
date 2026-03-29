@@ -35,6 +35,8 @@ export const codingProblemSchema = z.object({
   verificationCases: z.array(problemTestCaseSchema).default([]),
   constraints: z.array(z.string()).default([]),
   imageAssets: z.array(problemImageAssetSchema).default([]),
+  extractionWarnings: z.array(z.string()).default([]),
+  artifactId: z.string().optional(),
 });
 
 export type CodingProblem = z.infer<typeof codingProblemSchema>;
