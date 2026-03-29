@@ -52,10 +52,10 @@ export async function processTelegramUpdate(
   const client = createTelegramBotClient(logger);
   const chatId = message.chat.id;
   const text = message.text?.trim();
-  const session = telegramSessionStore.get(chatId);
+  const session = await telegramSessionStore.get(chatId);
 
   if (text === "1") {
-    telegramSessionStore.startCollecting(chatId);
+    await telegramSessionStore.startCollecting(chatId);
     await client.sendTextMessage(
       chatId,
       "Image collection started. Send images of the coding problem now. When you are done, send 2 and I will start processing.",
@@ -83,7 +83,7 @@ export async function processTelegramUpdate(
       return;
     }
 
-    telegramSessionStore.startProcessing(chatId);
+    await telegramSessionStore.startProcessing(chatId);
     await processCollectedImages(update, message, client, logger);
     return;
   }
@@ -99,7 +99,7 @@ export async function processTelegramUpdate(
       return;
     }
 
-    const updated = telegramSessionStore.addImage(chatId, pendingImage);
+    const updated = await telegramSessionStore.addImage(chatId, pendingImage);
     await client.sendTextMessage(
       chatId,
       `Image ${updated.images.length} saved. Send more images, or send 2 to start processing.`,
@@ -140,7 +140,7 @@ async function processCollectedImages(
   logger: Logger,
 ): Promise<void> {
   const chatId = message.chat.id;
-  const session = telegramSessionStore.get(chatId);
+  const session = await telegramSessionStore.get(chatId);
   const workflow = createTelegramWorkflowMessenger(client, chatId, message.message_id);
   const workflowLogger = new CallbackLogger("telegram-workflow", (entry) => {
     console.log(JSON.stringify(entry));
@@ -179,7 +179,7 @@ async function processCollectedImages(
       undefined,
       message.message_id,
     );
-    telegramSessionStore.reset(chatId);
+    await telegramSessionStore.reset(chatId);
   } catch (error) {
     logger.error("telegram-update-failed", {
       updateId: update.update_id,
@@ -187,7 +187,7 @@ async function processCollectedImages(
     });
 
     if (error instanceof UnclearImagesError) {
-      telegramSessionStore.resetToCollecting(chatId);
+      await telegramSessionStore.resetToCollecting(chatId);
       await client.sendTextMessage(
         chatId,
         `The uploaded images were not clear enough to extract the full problem reliably.\n\n${error.message}\n\nPlease send clearer screenshots or photos, then send 2 again.`,
@@ -196,7 +196,7 @@ async function processCollectedImages(
       return;
     }
 
-    telegramSessionStore.reset(chatId);
+    await telegramSessionStore.reset(chatId);
     await client.sendTextMessage(chatId, buildFailureMessage(error), {
       replyToMessageId: message.message_id,
     });
@@ -212,6 +212,10 @@ async function buildRawQuestionRequestFromImages(
   const extractedSegments: ProblemImageExtractionResult[] = [];
 
   for (const [index, image] of images.entries()) {
+    logger.info("telegram-image-processing-progress", {
+      index: index + 1,
+      total: images.length,
+    });
     logger.info("telegram-image-processing-started", {
       index: index + 1,
       total: images.length,
@@ -227,6 +231,12 @@ async function buildRawQuestionRequestFromImages(
     });
 
     extractedSegments.push(extraction);
+    logger.info("telegram-image-processing-finished", {
+      index: index + 1,
+      total: images.length,
+      readability: extraction.readability,
+      coverage: extraction.coverage,
+    });
   }
 
   const unclearSegments = extractedSegments.filter(
@@ -409,6 +419,14 @@ function mapLogEntryToTelegramMessage(entry: LogEntry): string | null {
     typeof entry.data?.attempt === "number" ? entry.data.attempt : undefined;
 
   switch (entry.message) {
+    case "telegram-image-processing-progress":
+      if (
+        typeof entry.data?.index === "number" &&
+        typeof entry.data?.total === "number"
+      ) {
+        return `Reading image ${entry.data.index} of ${entry.data.total}.`;
+      }
+      return "Reading the uploaded image.";
     case "parser-template-selected":
       return "Recognized the problem format and built a deterministic solve request.";
     case "parser-agent-started":
@@ -425,6 +443,8 @@ function mapLogEntryToTelegramMessage(entry: LogEntry): string | null {
       return "Supervisor accepted the verified solution.";
     case "workflow-failed":
       return "Supervisor exhausted the retry budget without a verified answer.";
+    case "telegram-image-processing-finished":
+      return "Finished extracting text from one image.";
     default:
       return null;
   }

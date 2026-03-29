@@ -36,6 +36,10 @@ export async function handleHttpRequest(request: Request): Promise<Response> {
         process.env.TELEGRAM_BOT_TOKEN ??
           "8599626908:AAFXItwarN2ZkvXQGiPbwX9xami2tLmHZv8",
       ),
+      upstashConfigured: Boolean(
+        process.env.UPSTASH_REDIS_REST_URL ??
+          "https://pure-rabbit-71049.upstash.io",
+      ),
       openAiConfigured: Boolean(process.env.OPENAI_API_KEY),
     });
   }
@@ -142,11 +146,7 @@ async function handleTelegramWebhook(request: Request): Promise<Response> {
       console.log(JSON.stringify(entry));
     });
 
-    void processTelegramUpdate(update, logger).catch((error) => {
-      logger.error("telegram-background-processing-failed", {
-        reason: error instanceof Error ? error.message : "unknown-error",
-      });
-    });
+    await processTelegramUpdate(update, logger);
 
     return jsonResponse({ ok: true });
   } catch (error) {
