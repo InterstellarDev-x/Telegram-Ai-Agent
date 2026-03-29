@@ -1,4 +1,5 @@
 import type { RawQuestionRequest } from "../../contracts/http.js";
+import { RepairTriageAgent } from "../../agents/repair-triage-agent.js";
 import {
   telegramUpdateSchema,
   type TelegramMessage,
@@ -396,6 +397,19 @@ async function processFollowUpFeedback(
       workflowLogger.child("followup-ingress"),
       client,
     );
+    const feedbackImageAssets = followUpRequest.imageAssets.slice(
+      followUp.solveRequest.imageAssets.length,
+    );
+    const triage = await new RepairTriageAgent(
+      workflowLogger.child("repair-triage"),
+    ).triage({
+      request: followUpRequest,
+      candidate: followUp.currentCandidate,
+      userFeedbackTexts: followUp.feedbackTexts,
+      feedbackImageAssets,
+      previousVerdict: followUp.currentReport.verdict,
+    });
+    await workflow.send(triage.evidenceSummary);
 
     const report = await verifyCandidateWithFunctionHarness(
       followUpRequest,
@@ -423,8 +437,12 @@ async function processFollowUpFeedback(
     );
 
     const seededFeedbackHistory = report.feedback
-      ? [...followUp.feedbackHistory, report.feedback]
-      : [...followUp.feedbackHistory];
+      ? [
+          ...followUp.feedbackHistory,
+          ...(triage.feedback ? [triage.feedback] : []),
+          report.feedback,
+        ]
+      : [...followUp.feedbackHistory, ...(triage.feedback ? [triage.feedback] : [])];
     const seededPreviousCandidates = [
       ...followUp.previousCandidates,
       followUp.currentCandidate,
@@ -857,6 +875,10 @@ function mapLogEntryToTelegramMessage(entry: LogEntry): string | null {
         return `Candidate sources: ${entry.data.providers.join(", ")}.`;
       }
       return null;
+    case "repair-triage-started":
+      return "Analyzing your new error evidence.";
+    case "repair-triage-finished":
+      return "Prepared repair guidance from your latest feedback.";
     case "generation-started":
       return `Generating solution candidate${attempt ? ` (attempt ${attempt})` : ""}.`;
     case "deterministic-verification-failed":
