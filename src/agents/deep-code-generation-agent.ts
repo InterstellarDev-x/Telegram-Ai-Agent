@@ -68,6 +68,18 @@ actionItems:
 ${feedback.actionItems.map((item) => `- ${item}`).join("\n")}`,
           )
           .join("\n\n");
+  const priorCodeBlock =
+    input.previousCandidates.length === 0
+      ? "No prior failed code."
+      : input.previousCandidates
+          .map(
+            (candidate, index) => `Attempt ${index + 1} code:
+language: ${candidate.language}
+strategy: ${candidate.strategy}
+code:
+${candidate.code}`,
+          )
+          .join("\n\n");
 
   return `
 Attempt: ${input.attempt}
@@ -81,6 +93,9 @@ ${input.problem.statement}
 
 Known sample tests:
 ${JSON.stringify(input.problem.sampleCases, null, 2)}
+
+Prior failed code:
+${priorCodeBlock}
 
 Prior tester feedback:
 ${feedbackBlock}

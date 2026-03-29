@@ -29,6 +29,7 @@ export async function solveRawQuestion(
   const solveRequest: StreamedSolveRequest = {
     ...blueprint.suggestedSolveRequest,
     maxAttempts: request.maxAttempts,
+    imageAssets: request.imageAssets,
   };
 
   const result = await solveWithFunctionHarness(solveRequest, logger.child("solver"));

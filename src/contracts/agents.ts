@@ -102,6 +102,7 @@ export interface GenerateSolutionInput {
   problem: z.infer<typeof codingProblemSchema>;
   attempt: number;
   feedbackHistory: GenerationFeedback[];
+  previousCandidates: SolutionCandidate[];
 }
 
 export interface TestSolutionInput {

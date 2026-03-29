@@ -163,6 +163,7 @@ Constraints:
     ],
     verificationCases: [],
     constraints: [],
+    imageAssets: [],
   };
 }
 

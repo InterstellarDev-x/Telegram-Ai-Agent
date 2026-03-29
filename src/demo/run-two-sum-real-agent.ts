@@ -250,6 +250,7 @@ Output: [0,1]
     ],
     verificationCases: [],
     constraints: [],
+    imageAssets: [],
   };
 }
 

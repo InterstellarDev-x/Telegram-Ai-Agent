@@ -26,6 +26,7 @@ export class SupervisorAgent {
   async solve(request: SolveProblemRequest): Promise<SupervisorRunResult> {
     const correlationId = crypto.randomUUID();
     const feedbackHistory: GenerateSolutionInput["feedbackHistory"] = [];
+    const previousCandidates: GenerateSolutionInput["previousCandidates"] = [];
     let finalCandidate = undefined;
     let finalReport = undefined;
 
@@ -51,9 +52,11 @@ export class SupervisorAgent {
         problem: request.problem,
         attempt,
         feedbackHistory,
+        previousCandidates,
       });
 
       finalCandidate = candidate;
+      previousCandidates.push(candidate);
 
       this.options.transport.send(
         "code-generator",

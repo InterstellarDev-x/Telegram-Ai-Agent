@@ -17,6 +17,14 @@ export const problemTestCaseSchema = z.object({
 
 export type ProblemTestCase = z.infer<typeof problemTestCaseSchema>;
 
+export const problemImageAssetSchema = z.object({
+  mimeType: z.string().min(1),
+  dataUrl: z.string().min(1),
+  caption: z.string().optional(),
+});
+
+export type ProblemImageAsset = z.infer<typeof problemImageAssetSchema>;
+
 export const codingProblemSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -26,6 +34,7 @@ export const codingProblemSchema = z.object({
   sampleCases: z.array(problemTestCaseSchema).default([]),
   verificationCases: z.array(problemTestCaseSchema).default([]),
   constraints: z.array(z.string()).default([]),
+  imageAssets: z.array(problemImageAssetSchema).default([]),
 });
 
 export type CodingProblem = z.infer<typeof codingProblemSchema>;

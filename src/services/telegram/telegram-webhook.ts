@@ -10,6 +10,7 @@ import {
   ProblemImageExtractor,
   type ProblemImageExtractionResult,
 } from "../vision/problem-image-extractor.js";
+import type { ProblemImageAsset } from "../../contracts/problem.js";
 import { CallbackLogger, type LogEntry, type Logger } from "../../utils/logger.js";
 import {
   createTelegramBotClient,
@@ -210,6 +211,7 @@ async function buildRawQuestionRequestFromImages(
 ): Promise<RawQuestionRequest> {
   const extractor = new ProblemImageExtractor(logger.child("image-extractor"));
   const extractedSegments: ProblemImageExtractionResult[] = [];
+  const imageAssets: ProblemImageAsset[] = [];
 
   for (const [index, image] of images.entries()) {
     logger.info("telegram-image-processing-progress", {
@@ -224,13 +226,19 @@ async function buildRawQuestionRequestFromImages(
 
     const file = await client.getFile(image.fileId);
     const imageBytes = await client.downloadFile(file.file_path ?? "");
+    const mimeType = inferImageMimeType(file.file_path, image.mimeType);
     const extraction = await extractor.extractQuestion({
       imageBytes,
-      mimeType: inferImageMimeType(file.file_path, image.mimeType),
+      mimeType,
       caption: image.caption,
     });
 
     extractedSegments.push(extraction);
+    imageAssets.push({
+      mimeType,
+      dataUrl: buildDataUrl(imageBytes, mimeType),
+      caption: image.caption,
+    });
     logger.info("telegram-image-processing-finished", {
       index: index + 1,
       total: images.length,
@@ -268,6 +276,7 @@ async function buildRawQuestionRequestFromImages(
     question,
     targetLanguage: "typescript",
     maxAttempts: 4,
+    imageAssets,
   };
 }
 
@@ -362,6 +371,11 @@ function inferImageMimeType(filePath?: string, fallback?: string): string {
   }
 
   return "image/jpeg";
+}
+
+function buildDataUrl(imageBytes: Uint8Array, mimeType: string): string {
+  const base64 = Buffer.from(imageBytes).toString("base64");
+  return `data:${mimeType};base64,${base64}`;
 }
 
 function buildFailureMessage(error: unknown): string {

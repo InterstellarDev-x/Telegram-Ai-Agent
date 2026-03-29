@@ -1,96 +1,198 @@
+import { z } from "zod";
 import { DeepAgentCodeGenerationAgent } from "../../agents/deep-code-generation-agent.js";
 import { SupervisorAgent } from "../../agents/supervisor-agent.js";
 import type {
   CodeTestingAgent,
-  ExecutedCase,
   GenerationFeedback,
   TestSolutionInput,
   TestingReport,
 } from "../../contracts/agents.js";
-import type {
-  FunctionHarness,
-  StreamedSolveRequest,
-  StreamedTestCase,
-} from "../../contracts/http.js";
+import type { StreamedSolveRequest } from "../../contracts/http.js";
 import { buildProblemFromHttpRequest } from "../../contracts/http.js";
 import { InMemoryAgentTransport } from "../agent-transport.js";
-import { BunJavaScriptExecutor, BunTypeScriptExecutor } from "../execution/bun-executor.js";
-import { ExecutorRegistry } from "../execution/executor-registry.js";
-import { PythonExecutor } from "../execution/python-executor.js";
 import { createOpenAIChatModel } from "../llm/openai-chat-model.js";
+import { createOpenAIClient } from "../llm/openai-client.js";
 import type { Logger } from "../../utils/logger.js";
 
-export class FunctionHarnessTestingAgent implements CodeTestingAgent {
+const llmVerificationSchema = z.object({
+  passed: z.boolean(),
+  verdict: z.string().min(1),
+  rootCause: z.string().min(1),
+  actionItems: z.array(z.string()).default([]),
+  failingCases: z
+    .array(
+      z.object({
+        name: z.string(),
+        input: z.string(),
+        expectedOutput: z.string(),
+        actualOutput: z.string(),
+        source: z.string(),
+      }),
+    )
+    .default([]),
+});
+
+class ImageAwareCodeTestingAgent implements CodeTestingAgent {
   readonly role = "code-tester" as const;
 
-  constructor(
-    private readonly harness: FunctionHarness,
-    private readonly logger: Logger,
-    private readonly executorRegistry: ExecutorRegistry,
-  ) {}
+  constructor(private readonly logger: Logger) {}
 
   async test(input: TestSolutionInput): Promise<TestingReport> {
     this.logger.info("testing-started", {
       attempt: input.attempt,
       language: input.candidate.language,
+      imageAssets: input.problem.imageAssets.length,
     });
 
-    const executor = this.executorRegistry.get(input.candidate.language);
-    const executedCases: ExecutedCase[] = [];
+    const client = createOpenAIClient();
+    const content: Array<
+      | { type: "input_text"; text: string }
+      | { type: "input_image"; image_url: string; detail: "high" }
+    > = [
+      {
+        type: "input_text",
+        text: buildVerificationPrompt(input),
+      },
+      ...input.problem.imageAssets.map((asset) => ({
+        type: "input_image" as const,
+        image_url: asset.dataUrl,
+        detail: "high" as const,
+      })),
+    ];
 
-    for (const testCase of this.harness.tests) {
-      const execution = await executor.execute(
-        buildHarnessSource(input.candidate.code, this.harness, testCase),
-        "",
-        5_000,
-      );
+    const response = await client.responses.create({
+      model:
+        process.env.OPENAI_VISION_MODEL ??
+        process.env.OPENAI_MODEL ??
+        "gpt-4.1",
+      temperature: 0,
+      instructions: `
+You are the Code Verification Agent for a coding-problem solver.
 
-      const parsed = parseHarnessResult(execution.stdout);
-      const passed =
-        execution.exitCode === 0 &&
-        !execution.timedOut &&
-        parsed.ok &&
-        parsed.passed;
+Your job is to decide whether the submitted code correctly solves the coding problem.
 
-      executedCases.push({
-        name: testCase.name,
-        source: testCase.source,
-        input: JSON.stringify(testCase.input),
-        expectedOutput: JSON.stringify(testCase.expected),
-        actualOutput: parsed.output,
-        passed,
-        runtimeError:
-          execution.timedOut
-            ? "Execution timed out."
-            : execution.stderr.trim() || parsed.error,
-        durationMs: execution.durationMs,
-      });
-    }
+Rules:
+- Treat the original problem images as the highest-priority source of truth.
+- Use the reconstructed text problem statement as supporting context.
+- Review the candidate code logically. You do not need to execute it.
+- Be conservative: mark passed=true only if the code clearly solves the shown problem.
+- If the code is wrong, incomplete, or mismatched to the screenshots, mark passed=false.
+- rootCause must be a short concrete explanation of the main defect or uncertainty.
+- actionItems must be specific instructions for the next generation attempt.
+- failingCases may be empty if exact I/O cannot be derived confidently from the screenshots.
+- Return only JSON matching the schema.
+      `.trim(),
+      input: [
+        {
+          role: "user",
+          content,
+        },
+      ],
+      text: {
+        format: {
+          type: "json_schema",
+          name: "llm_code_verification",
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "passed",
+              "verdict",
+              "rootCause",
+              "actionItems",
+              "failingCases",
+            ],
+            properties: {
+              passed: {
+                type: "boolean",
+              },
+              verdict: {
+                type: "string",
+              },
+              rootCause: {
+                type: "string",
+              },
+              actionItems: {
+                type: "array",
+                items: {
+                  type: "string",
+                },
+              },
+              failingCases: {
+                type: "array",
+                items: {
+                  type: "object",
+                  additionalProperties: false,
+                  required: [
+                    "name",
+                    "input",
+                    "expectedOutput",
+                    "actualOutput",
+                    "source",
+                  ],
+                  properties: {
+                    name: {
+                      type: "string",
+                    },
+                    input: {
+                      type: "string",
+                    },
+                    expectedOutput: {
+                      type: "string",
+                    },
+                    actualOutput: {
+                      type: "string",
+                    },
+                    source: {
+                      type: "string",
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
 
-    const failures = executedCases.filter((testCase) => !testCase.passed);
-    if (failures.length === 0) {
+    const review = llmVerificationSchema.parse(JSON.parse(response.output_text.trim()));
+
+    if (review.passed) {
       this.logger.info("testing-passed", {
         attempt: input.attempt,
-        cases: executedCases.length,
+        requestId: response._request_id,
       });
 
       return {
         status: "passed",
-        verdict: `Validated on ${executedCases.length} harness case(s).`,
-        executedCases,
+        verdict: review.verdict,
+        executedCases: [],
       };
     }
 
-    const feedback = buildFeedback(this.harness, failures);
     this.logger.warn("testing-failed", {
       attempt: input.attempt,
-      failures: failures.length,
+      requestId: response._request_id,
+      failingCases: review.failingCases.length,
     });
+
+    const feedback: GenerationFeedback = {
+      summary: review.verdict,
+      rootCause: review.rootCause,
+      actionItems:
+        review.actionItems.length > 0
+          ? review.actionItems
+          : [
+              "Re-read the problem statement and screenshots carefully.",
+              "Fix the logic mismatch identified by the verification review.",
+            ],
+      failingCases: review.failingCases,
+    };
 
     return {
       status: "failed",
-      verdict: `Failed ${failures.length} of ${executedCases.length} harness case(s).`,
-      executedCases,
+      verdict: review.verdict,
+      executedCases: [],
       feedback,
     };
   }
@@ -105,19 +207,9 @@ export async function solveWithFunctionHarness(
     temperature: 0,
   });
 
-  const executorRegistry = new ExecutorRegistry([
-    new BunJavaScriptExecutor(),
-    new BunTypeScriptExecutor(),
-    new PythonExecutor(),
-  ]);
-
   const supervisor = new SupervisorAgent({
     generator: new DeepAgentCodeGenerationAgent(model, logger),
-    tester: new FunctionHarnessTestingAgent(
-      request.harness,
-      logger.child("function-harness-tester"),
-      executorRegistry,
-    ),
+    tester: new ImageAwareCodeTestingAgent(logger.child("image-aware-tester")),
     transport: new InMemoryAgentTransport(logger.child("transport")),
     logger,
   });
@@ -128,87 +220,35 @@ export async function solveWithFunctionHarness(
   });
 }
 
-function buildHarnessSource(
-  candidateCode: string,
-  harness: FunctionHarness,
-  testCase: StreamedTestCase,
-): string {
+function buildVerificationPrompt(input: TestSolutionInput): string {
+  const sampleCases =
+    input.problem.sampleCases.length === 0
+      ? "No parsed sample cases were available."
+      : JSON.stringify(input.problem.sampleCases, null, 2);
+  const previousFeedback =
+    input.attempt <= 1
+      ? "No previous verifier feedback."
+      : "This is a retry after previous verification feedback. Focus on whether the current code fixes the earlier issues and fully matches the screenshots.";
+
   return `
-${candidateCode}
+Attempt: ${input.attempt}
+Target language: ${input.candidate.language}
 
-${harness.prelude}
+Problem title:
+${input.problem.title}
 
-const testCase = ${JSON.stringify(testCase)};
+Reconstructed statement:
+${input.problem.statement}
 
-if (typeof ${harness.functionName} !== "function") {
-  throw new Error("Expected a function named ${harness.functionName}.");
-}
+Parsed sample cases:
+${sampleCases}
 
-const actual = ${harness.invokeExpression};
-const passed = (() => ${harness.assertionExpression})();
+Candidate code:
+${input.candidate.code}
 
-console.log(JSON.stringify({ actual, passed }));
+Context:
+${previousFeedback}
+
+Decide whether this code is correct for the coding problem shown in the attached images.
   `.trim();
-}
-
-function parseHarnessResult(stdout: string): {
-  ok: boolean;
-  passed: boolean;
-  output: string;
-  error?: string;
-} {
-  const trimmed = stdout.trim();
-
-  if (!trimmed) {
-    return {
-      ok: false,
-      passed: false,
-      output: "",
-      error: "Harness did not produce JSON output.",
-    };
-  }
-
-  try {
-    const parsed = JSON.parse(trimmed) as {
-      actual?: unknown;
-      passed?: boolean;
-    };
-
-    return {
-      ok: true,
-      passed: parsed.passed === true,
-      output: JSON.stringify(parsed.actual),
-    };
-  } catch {
-    return {
-      ok: false,
-      passed: false,
-      output: trimmed,
-      error: "Harness output was not valid JSON.",
-    };
-  }
-}
-
-function buildFeedback(
-  harness: FunctionHarness,
-  failures: ExecutedCase[],
-): GenerationFeedback {
-  return {
-    summary: `The generated ${harness.functionName} function failed harness verification.`,
-    rootCause:
-      failures[0]?.runtimeError ??
-      "The generated function does not satisfy the provided assertion expression.",
-    actionItems: [
-      `Return a function named ${harness.functionName}.`,
-      "Return only the function implementation, not a full program.",
-      "Fix the logic using the failing harness cases.",
-    ],
-    failingCases: failures.map((failure) => ({
-      name: failure.name,
-      input: failure.input,
-      expectedOutput: failure.expectedOutput,
-      actualOutput: failure.actualOutput,
-      source: failure.source,
-    })),
-  };
 }

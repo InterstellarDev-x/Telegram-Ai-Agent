@@ -1,5 +1,9 @@
 import { z } from "zod";
-import { codingProblemSchema, supportedLanguages } from "./problem.js";
+import {
+  codingProblemSchema,
+  problemImageAssetSchema,
+  supportedLanguages,
+} from "./problem.js";
 
 export const streamedTestCaseSchema = z.object({
   name: z.string(),
@@ -28,6 +32,7 @@ export const streamedSolveRequestSchema = z.object({
   instructions: z.array(z.string()).default([]),
   maxAttempts: z.number().int().positive().max(10).default(4),
   harness: functionHarnessSchema,
+  imageAssets: z.array(problemImageAssetSchema).default([]),
 });
 
 export type StreamedSolveRequest = z.infer<typeof streamedSolveRequestSchema>;
@@ -36,6 +41,7 @@ export const rawQuestionRequestSchema = z.object({
   question: z.string().min(1),
   targetLanguage: z.enum(supportedLanguages).default("typescript"),
   maxAttempts: z.number().int().positive().max(10).default(4),
+  imageAssets: z.array(problemImageAssetSchema).default([]),
 });
 
 export type RawQuestionRequest = z.infer<typeof rawQuestionRequestSchema>;
@@ -109,5 +115,6 @@ export function buildProblemFromHttpRequest(
         source: testCase.source,
       })),
     constraints: [],
+    imageAssets: request.imageAssets,
   };
 }

@@ -32,6 +32,7 @@ Output: true
           `.trim(),
           targetLanguage: "typescript",
           maxAttempts: 4,
+          imageAssets: [],
         },
         new MemoryLogger("test"),
       );
