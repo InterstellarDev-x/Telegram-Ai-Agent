@@ -16,17 +16,17 @@ import type { Logger } from "../../utils/logger.js";
 
 const llmVerificationSchema = z.object({
   passed: z.boolean(),
-  verdict: z.string().min(1),
-  rootCause: z.string().min(1),
+  verdict: z.string().default(""),
+  rootCause: z.string().default(""),
   actionItems: z.array(z.string()).default([]),
   failingCases: z
     .array(
       z.object({
-        name: z.string(),
-        input: z.string(),
-        expectedOutput: z.string(),
-        actualOutput: z.string(),
-        source: z.string(),
+        name: z.string().default(""),
+        input: z.string().default(""),
+        expectedOutput: z.string().default(""),
+        actualOutput: z.string().default(""),
+        source: z.string().default(""),
       }),
     )
     .default([]),
@@ -155,7 +155,9 @@ Rules:
       },
     });
 
-    const review = llmVerificationSchema.parse(JSON.parse(response.output_text.trim()));
+    const review = normalizeVerificationReview(
+      llmVerificationSchema.parse(JSON.parse(response.output_text.trim())),
+    );
 
     if (review.passed) {
       this.logger.info("testing-passed", {
@@ -196,6 +198,53 @@ Rules:
       feedback,
     };
   }
+}
+
+function normalizeVerificationReview(
+  review: z.infer<typeof llmVerificationSchema>,
+): {
+  passed: boolean;
+  verdict: string;
+  rootCause: string;
+  actionItems: string[];
+  failingCases: Array<{
+    name: string;
+    input: string;
+    expectedOutput: string;
+    actualOutput: string;
+    source: string;
+  }>;
+} {
+  const verdict = review.verdict.trim() || defaultVerdict(review.passed);
+  const rootCause = review.rootCause.trim() || defaultRootCause(review.passed, verdict);
+  const actionItems = review.actionItems
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const failingCases = review.failingCases.map((failure, index) => ({
+    name: failure.name.trim() || `review-case-${index + 1}`,
+    input: failure.input.trim(),
+    expectedOutput: failure.expectedOutput.trim(),
+    actualOutput: failure.actualOutput.trim(),
+    source: failure.source.trim() || "review",
+  }));
+
+  return {
+    passed: review.passed,
+    verdict,
+    rootCause,
+    actionItems,
+    failingCases,
+  };
+}
+
+function defaultVerdict(passed: boolean): string {
+  return passed
+    ? "The code appears correct for the uploaded problem."
+    : "The code could not be verified as correct for the uploaded problem.";
+}
+
+function defaultRootCause(passed: boolean, verdict: string): string {
+  return passed ? verdict : "The verifier did not provide a concrete root cause.";
 }
 
 export async function solveWithFunctionHarness(
