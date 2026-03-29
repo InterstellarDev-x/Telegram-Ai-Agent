@@ -70,7 +70,7 @@ export async function processTelegramUpdate(
     if (session.mode === "processing") {
       await client.sendTextMessage(
         chatId,
-        "I am already processing your previous batch of images.",
+        "Your previous solve is still running. Please wait for it to finish instead of sending 2 again.",
         { replyToMessageId: message.message_id },
       );
       return;
