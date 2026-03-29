@@ -5,6 +5,14 @@ import {
   type SolutionCandidate,
 } from "../contracts/agents.js";
 import type { Logger } from "../utils/logger.js";
+import {
+  compactProblemStatement,
+  estimatePromptChars,
+  formatFeedbackHistory,
+  formatPreviousCandidates,
+  formatSampleCases,
+  formatWarnings,
+} from "../utils/prompt-compaction.js";
 
 const GEMINI_CODE_GENERATION_SYSTEM_PROMPT = `
 You are the Code Generation Agent in a coding-problem solving backend.
@@ -28,6 +36,7 @@ Your job:
 
 export class GeminiCodeGenerationAgent implements CodeGenerationAgent {
   readonly role = "code-generator" as const;
+  readonly providerName = "gemini" as const;
   private readonly logger: Logger;
   private readonly apiKey: string;
   private readonly model: string;
@@ -51,6 +60,18 @@ export class GeminiCodeGenerationAgent implements CodeGenerationAgent {
       model: this.model,
     });
 
+    const prompt = buildGenerationPrompt(input);
+    this.logger.info("generation-context-compacted", {
+      attempt: input.attempt,
+      provider: "gemini",
+      promptChars: estimatePromptChars(
+        GEMINI_CODE_GENERATION_SYSTEM_PROMPT,
+        prompt,
+      ),
+      previousCandidates: input.previousCandidates.length,
+      feedbackCount: input.feedbackHistory.length,
+      sampleCases: input.problem.sampleCases.length,
+    });
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${encodeURIComponent(this.apiKey)}`,
       {
@@ -64,9 +85,7 @@ export class GeminiCodeGenerationAgent implements CodeGenerationAgent {
               role: "user",
               parts: [
                 {
-                  text: `${GEMINI_CODE_GENERATION_SYSTEM_PROMPT.trim()}\n\n${buildGenerationPrompt(
-                    input,
-                  )}`,
+                  text: `${GEMINI_CODE_GENERATION_SYSTEM_PROMPT.trim()}\n\n${prompt}`,
                 },
               ],
             },
@@ -103,35 +122,11 @@ export class GeminiCodeGenerationAgent implements CodeGenerationAgent {
 }
 
 function buildGenerationPrompt(input: GenerateSolutionInput): string {
-  const feedbackBlock =
-    input.feedbackHistory.length === 0
-      ? "No prior tester feedback."
-      : input.feedbackHistory
-          .map(
-            (feedback, index) => `Attempt ${index + 1} feedback:
-summary: ${feedback.summary}
-rootCause: ${feedback.rootCause}
-actionItems:
-${feedback.actionItems.map((item) => `- ${item}`).join("\n")}`,
-          )
-          .join("\n\n");
-  const priorCodeBlock =
-    input.previousCandidates.length === 0
-      ? "No prior failed code."
-      : input.previousCandidates
-          .map(
-            (candidate, index) => `Attempt ${index + 1} code:
-provider: ${candidate.provider ?? "unknown"}
-language: ${candidate.language}
-strategy: ${candidate.strategy}
-code:
-${candidate.code}`,
-          )
-          .join("\n\n");
-  const extractionWarnings =
-    input.problem.extractionWarnings.length === 0
-      ? "No extraction warnings."
-      : input.problem.extractionWarnings.map((warning) => `- ${warning}`).join("\n");
+  const feedbackBlock = formatFeedbackHistory(input.feedbackHistory);
+  const priorCodeBlock = formatPreviousCandidates(input.previousCandidates);
+  const extractionWarnings = formatWarnings(input.problem.extractionWarnings);
+  const sampleCases = formatSampleCases(input.problem.sampleCases);
+  const compactStatement = compactProblemStatement(input.problem.statement);
 
   return `
 Attempt: ${input.attempt}
@@ -141,12 +136,12 @@ Problem title:
 ${input.problem.title}
 
 Problem statement:
-${input.problem.statement}
+${compactStatement}
 
 Problem images attached to verifier: ${input.problem.imageAssets.length}
 
 Known sample tests:
-${JSON.stringify(input.problem.sampleCases, null, 2)}
+${sampleCases}
 
 Extraction warnings:
 ${extractionWarnings}

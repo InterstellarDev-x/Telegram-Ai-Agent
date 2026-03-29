@@ -27,8 +27,9 @@ export class MultiCodeGenerationAgent implements CodeGenerationAgent {
   async generateCandidates(
     input: GenerateSolutionInput,
   ): Promise<SolutionCandidate[]> {
+    const activeGenerators = this.selectGenerators(input);
     const settled = await Promise.allSettled(
-      this.generators.map(async (generator) => await generator.generate(input)),
+      activeGenerators.map(async (generator) => await generator.generate(input)),
     );
 
     const candidates: SolutionCandidate[] = [];
@@ -66,5 +67,31 @@ export class MultiCodeGenerationAgent implements CodeGenerationAgent {
     }
 
     return candidates;
+  }
+
+  private selectGenerators(input: GenerateSolutionInput): CodeGenerationAgent[] {
+    const selected = this.generators.filter((generator) => {
+      if (generator.providerName !== "gemini") {
+        return true;
+      }
+
+      return input.attempt > 1;
+    });
+
+    if (selected.length === 0) {
+      return this.generators;
+    }
+
+    const skippedProviders = this.generators
+      .filter((generator) => !selected.includes(generator))
+      .map((generator) => generator.providerName ?? "unknown");
+    if (skippedProviders.length > 0) {
+      this.logger.info("generation-providers-skipped", {
+        attempt: input.attempt,
+        skipped: skippedProviders,
+      });
+    }
+
+    return selected;
   }
 }

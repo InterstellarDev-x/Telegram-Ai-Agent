@@ -488,7 +488,7 @@ async function processFollowUpFeedback(
       message.message_id,
     );
     await telegramSessionStore.updateFollowUpAfterRepair(chatId, {
-      solveRequest: followUpRequest,
+      solveRequest: followUp.solveRequest,
       currentCandidate: result.finalCandidate,
       currentReport: result.finalReport,
       feedbackImages: [],
@@ -632,7 +632,7 @@ async function buildFollowUpSolveRequest(
   const feedbackTextBlock =
     followUp.feedbackTexts.length === 0
       ? ""
-      : `\n\nUser feedback after trying the previous code:\n${followUp.feedbackTexts
+      : `User feedback after trying the previous code:\n${followUp.feedbackTexts
           .map((text) => `- ${text}`)
           .join("\n")}`;
 
@@ -647,8 +647,8 @@ async function buildFollowUpSolveRequest(
       ...followUp.solveRequest.instructions,
       "Treat the new screenshots/text as post-submission error evidence for the previous code.",
       "If the evidence shows the previous code is wrong, fix it and produce a revised solution.",
+      ...(feedbackTextBlock ? [feedbackTextBlock] : []),
     ],
-    statement: `${followUp.solveRequest.statement}${feedbackTextBlock}`.trim(),
   };
 }
 

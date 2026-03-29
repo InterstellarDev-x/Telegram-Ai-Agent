@@ -17,6 +17,11 @@ import { InMemoryAgentTransport } from "../agent-transport.js";
 import { createOpenAIChatModel } from "../llm/openai-chat-model.js";
 import { createOpenAIClient } from "../llm/openai-client.js";
 import type { Logger } from "../../utils/logger.js";
+import {
+  compactProblemStatement,
+  formatSampleCases,
+  formatWarnings,
+} from "../../utils/prompt-compaction.js";
 
 const llmVerificationSchema = z.object({
   passed: z.boolean(),
@@ -311,18 +316,16 @@ export async function verifyCandidateWithFunctionHarness(
 }
 
 function buildVerificationPrompt(input: TestSolutionInput): string {
-  const sampleCases =
-    input.problem.sampleCases.length === 0
-      ? "No parsed sample cases were available."
-      : JSON.stringify(input.problem.sampleCases, null, 2);
+  const sampleCases = formatSampleCases(input.problem.sampleCases, {
+    maxCases: 4,
+    maxInputChars: 300,
+    maxOutputChars: 300,
+  });
   const previousFeedback =
     input.attempt <= 1
       ? "No previous verifier feedback."
       : "This is a retry after previous verification feedback. Focus on whether the current code fixes the earlier issues and fully matches the screenshots.";
-  const extractionWarnings =
-    input.problem.extractionWarnings.length === 0
-      ? "No extraction warnings."
-      : input.problem.extractionWarnings.map((warning) => `- ${warning}`).join("\n");
+  const extractionWarnings = formatWarnings(input.problem.extractionWarnings);
 
   return `
 Attempt: ${input.attempt}
@@ -332,7 +335,7 @@ Problem title:
 ${input.problem.title}
 
 Reconstructed statement:
-${input.problem.statement}
+${compactProblemStatement(input.problem.statement, 7_000)}
 
 Parsed sample cases:
 ${sampleCases}

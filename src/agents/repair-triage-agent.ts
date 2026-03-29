@@ -7,6 +7,11 @@ import type { StreamedSolveRequest } from "../contracts/http.js";
 import type { ProblemImageAsset } from "../contracts/problem.js";
 import { createOpenAIClient } from "../services/llm/openai-client.js";
 import type { Logger } from "../utils/logger.js";
+import {
+  compactProblemStatement,
+  estimatePromptChars,
+  truncateMiddle,
+} from "../utils/prompt-compaction.js";
 
 const repairTriageSchema = z.object({
   needsRepair: z.boolean(),
@@ -60,13 +65,19 @@ export class RepairTriageAgent {
     });
 
     const client = createOpenAIClient();
+    const prompt = buildRepairTriagePrompt(input);
+    this.logger.info("repair-triage-context-compacted", {
+      promptChars: estimatePromptChars(prompt),
+      feedbackTexts: input.userFeedbackTexts.length,
+      feedbackImages: input.feedbackImageAssets.length,
+    });
     const content: Array<
       | { type: "input_text"; text: string }
       | { type: "input_image"; image_url: string; detail: "high" }
     > = [
       {
         type: "input_text",
-        text: buildRepairTriagePrompt(input),
+        text: prompt,
       },
       ...input.feedbackImageAssets.map((asset) => ({
         type: "input_image" as const,
@@ -204,10 +215,10 @@ Problem title:
 ${input.request.title}
 
 Problem statement:
-${input.request.statement}
+${compactProblemStatement(input.request.statement, 5_000)}
 
 Current code:
-${input.candidate.code}
+${truncateMiddle(input.candidate.code, 5_000)}
 
 Current code strategy:
 ${input.candidate.strategy}

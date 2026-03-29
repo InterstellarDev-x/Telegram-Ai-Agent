@@ -114,6 +114,7 @@ export interface TestSolutionInput {
 
 export interface CodeGenerationAgent {
   readonly role: "code-generator";
+  readonly providerName?: "openai" | "gemini";
   generate(input: GenerateSolutionInput): Promise<SolutionCandidate>;
   generateCandidates?(input: GenerateSolutionInput): Promise<SolutionCandidate[]>;
 }
