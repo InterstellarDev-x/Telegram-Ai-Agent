@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { createOpenAIClient } from "../llm/openai-client.js";
+import { generateGeminiJson } from "../llm/gemini-json.js";
 import type { Logger } from "../../utils/logger.js";
 
 const extractedImageProblemSchema = z.object({
@@ -32,6 +32,84 @@ const extractedImageProblemSchema = z.object({
     }),
   issues: z.array(z.string()).default([]),
 });
+
+const extractedImageProblemGeminiSchema = {
+  type: "OBJECT",
+  properties: {
+    questionText: { type: "STRING" },
+    starterTemplateText: { type: "STRING" },
+    readability: {
+      type: "STRING",
+      enum: ["clear", "unclear"],
+    },
+    coverage: {
+      type: "STRING",
+      enum: ["complete", "partial"],
+    },
+    imageKind: {
+      type: "STRING",
+      enum: ["statement", "template", "mixed", "unknown"],
+    },
+    visibleSections: {
+      type: "ARRAY",
+      items: { type: "STRING" },
+    },
+    sections: {
+      type: "OBJECT",
+      properties: {
+        title: { type: "STRING" },
+        statement: { type: "STRING" },
+        input: { type: "STRING" },
+        output: { type: "STRING" },
+        constraints: { type: "STRING" },
+        examples: { type: "STRING" },
+        notes: { type: "STRING" },
+      },
+      required: [
+        "title",
+        "statement",
+        "input",
+        "output",
+        "constraints",
+        "examples",
+        "notes",
+      ],
+      propertyOrdering: [
+        "title",
+        "statement",
+        "input",
+        "output",
+        "constraints",
+        "examples",
+        "notes",
+      ],
+    },
+    issues: {
+      type: "ARRAY",
+      items: { type: "STRING" },
+    },
+  },
+  required: [
+    "questionText",
+    "starterTemplateText",
+    "readability",
+    "coverage",
+    "imageKind",
+    "visibleSections",
+    "sections",
+    "issues",
+  ],
+  propertyOrdering: [
+    "questionText",
+    "starterTemplateText",
+    "readability",
+    "coverage",
+    "imageKind",
+    "visibleSections",
+    "sections",
+    "issues",
+  ],
+} as const;
 
 export interface ProblemImageExtractionInput {
   imageBytes: Uint8Array;
@@ -70,12 +148,13 @@ export class ProblemImageExtractor {
       sizeBytes: input.imageBytes.byteLength,
     });
 
-    const client = createOpenAIClient();
     const dataUrl = buildDataUrl(input.imageBytes, input.mimeType);
-    const response = await client.responses.create({
-      model: process.env.OPENAI_VISION_MODEL ?? process.env.OPENAI_MODEL ?? "gpt-4.1",
-      temperature: 0,
-      instructions: `
+    const parsed = await generateGeminiJson({
+      model:
+        process.env.GEMINI_VISION_MODEL?.trim() ||
+        process.env.GEMINI_MODEL?.trim() ||
+        "gemini-2.5-flash",
+      prompt: `
 You extract coding problem statements from images for a backend solver.
 
 Return a JSON object with these fields:
@@ -105,109 +184,22 @@ Rules:
 - Do not wrap the result in markdown.
 - If the image contains only part of the question, return the visible text only and set coverage to "partial".
 - If the image is blurry, cut off, low contrast, or not a coding problem, set readability to "unclear".
+Additional context:
+${
+        input.caption?.trim()
+          ? `Telegram caption or note from the user:\n${input.caption.trim()}`
+          : "No extra caption was attached."
+      }
       `.trim(),
-      input: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "input_text",
-              text: input.caption?.trim()
-                ? `Telegram caption or note from the user:\n${input.caption.trim()}`
-                : "Extract the coding problem text from this image.",
-            },
-            {
-              type: "input_image",
-              image_url: dataUrl,
-              detail: "high",
-            },
-          ],
-        },
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "extracted_problem",
-          schema: {
-              type: "object",
-              additionalProperties: false,
-              required: [
-                "questionText",
-                "starterTemplateText",
-                "readability",
-                "coverage",
-                "imageKind",
-                "visibleSections",
-                "sections",
-                "issues",
-              ],
-              properties: {
-                questionText: {
-                  type: "string",
-                },
-                starterTemplateText: {
-                  type: "string",
-                },
-                readability: {
-                  type: "string",
-                  enum: ["clear", "unclear"],
-                },
-                coverage: {
-                  type: "string",
-                  enum: ["complete", "partial"],
-                },
-                imageKind: {
-                  type: "string",
-                  enum: ["statement", "template", "mixed", "unknown"],
-                },
-                visibleSections: {
-                  type: "array",
-                  items: {
-                    type: "string",
-                  },
-                },
-                sections: {
-                  type: "object",
-                  additionalProperties: false,
-                  required: [
-                    "title",
-                    "statement",
-                    "input",
-                    "output",
-                    "constraints",
-                    "examples",
-                    "notes",
-                  ],
-                  properties: {
-                    title: { type: "string" },
-                    statement: { type: "string" },
-                    input: { type: "string" },
-                    output: { type: "string" },
-                    constraints: { type: "string" },
-                    examples: { type: "string" },
-                    notes: { type: "string" },
-                  },
-                },
-                issues: {
-                  type: "array",
-                  items: {
-                    type: "string",
-                  },
-                },
-              },
-            },
-          },
-      },
+      imageDataUrls: [dataUrl],
+      schema: extractedImageProblemGeminiSchema,
+      parse: (value) => extractedImageProblemSchema.parse(value),
     });
-
-    const outputText = response.output_text.trim();
-    const parsed = extractedImageProblemSchema.parse(JSON.parse(outputText));
 
     this.logger.info("image-extraction-finished", {
       questionLength: parsed.questionText.length,
       readability: parsed.readability,
       coverage: parsed.coverage,
-      requestId: response._request_id,
     });
 
     return {

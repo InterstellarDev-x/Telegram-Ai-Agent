@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { DeepAgentCodeGenerationAgent } from "../../agents/deep-code-generation-agent.js";
 import { GeminiCodeGenerationAgent } from "../../agents/gemini-code-generation-agent.js";
 import { MultiCodeGenerationAgent } from "../../agents/multi-code-generation-agent.js";
 import { SupervisorAgent } from "../../agents/supervisor-agent.js";
@@ -14,8 +13,7 @@ import type {
 import type { StreamedSolveRequest } from "../../contracts/http.js";
 import { buildProblemFromHttpRequest } from "../../contracts/http.js";
 import { InMemoryAgentTransport } from "../agent-transport.js";
-import { createPooledChatModel } from "../llm/key-pool/pooled-chat-model.js";
-import { getPooledOpenAIClient } from "../llm/key-pool/pooled-openai-client.js";
+import { generateGeminiJson } from "../llm/gemini-json.js";
 import type { Logger } from "../../utils/logger.js";
 import {
   compactProblemStatement,
@@ -41,6 +39,48 @@ const llmVerificationSchema = z.object({
     .default([]),
 });
 
+const llmVerificationGeminiSchema = {
+  type: "OBJECT",
+  properties: {
+    passed: { type: "BOOLEAN" },
+    verdict: { type: "STRING" },
+    rootCause: { type: "STRING" },
+    actionItems: {
+      type: "ARRAY",
+      items: { type: "STRING" },
+    },
+    failingCases: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          name: { type: "STRING" },
+          input: { type: "STRING" },
+          expectedOutput: { type: "STRING" },
+          actualOutput: { type: "STRING" },
+          source: { type: "STRING" },
+        },
+        required: ["name", "input", "expectedOutput", "actualOutput", "source"],
+        propertyOrdering: ["name", "input", "expectedOutput", "actualOutput", "source"],
+      },
+    },
+  },
+  required: [
+    "passed",
+    "verdict",
+    "rootCause",
+    "actionItems",
+    "failingCases",
+  ],
+  propertyOrdering: [
+    "passed",
+    "verdict",
+    "rootCause",
+    "actionItems",
+    "failingCases",
+  ],
+} as const;
+
 class ImageAwareCodeTestingAgent implements CodeTestingAgent {
   readonly role = "code-tester" as const;
 
@@ -62,29 +102,13 @@ class ImageAwareCodeTestingAgent implements CodeTestingAgent {
       return deterministicGuardrailReport;
     }
 
-    const pooledClient = getPooledOpenAIClient();
-    const content: Array<
-      | { type: "input_text"; text: string }
-      | { type: "input_image"; image_url: string; detail: "high" }
-    > = [
-      {
-        type: "input_text",
-        text: buildVerificationPrompt(input),
-      },
-      ...input.problem.imageAssets.map((asset) => ({
-        type: "input_image" as const,
-        image_url: asset.dataUrl,
-        detail: "high" as const,
-      })),
-    ];
-
-    const response = await pooledClient.withKey((client) => client.responses.create({
-      model:
-        process.env.OPENAI_VISION_MODEL ??
-        process.env.OPENAI_MODEL ??
-        "gpt-4.1",
-      temperature: 0,
-      instructions: `
+    const review = normalizeVerificationReview(
+      await generateGeminiJson({
+        model:
+          process.env.GEMINI_VISION_MODEL?.trim() ||
+          process.env.GEMINI_MODEL?.trim() ||
+          "gemini-2.5-flash",
+        prompt: `
 You are the Code Verification Agent for a coding-problem solver.
 
 Your job is to decide whether the submitted code correctly solves the coding problem.
@@ -103,88 +127,17 @@ Rules:
 - actionItems must be specific instructions for the next generation attempt.
 - failingCases may be empty if exact I/O cannot be derived confidently from the screenshots.
 - Return only JSON matching the schema.
+${buildVerificationPrompt(input)}
       `.trim(),
-      input: [
-        {
-          role: "user",
-          content,
-        },
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "llm_code_verification",
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            required: [
-              "passed",
-              "verdict",
-              "rootCause",
-              "actionItems",
-              "failingCases",
-            ],
-            properties: {
-              passed: {
-                type: "boolean",
-              },
-              verdict: {
-                type: "string",
-              },
-              rootCause: {
-                type: "string",
-              },
-              actionItems: {
-                type: "array",
-                items: {
-                  type: "string",
-                },
-              },
-              failingCases: {
-                type: "array",
-                items: {
-                  type: "object",
-                  additionalProperties: false,
-                  required: [
-                    "name",
-                    "input",
-                    "expectedOutput",
-                    "actualOutput",
-                    "source",
-                  ],
-                  properties: {
-                    name: {
-                      type: "string",
-                    },
-                    input: {
-                      type: "string",
-                    },
-                    expectedOutput: {
-                      type: "string",
-                    },
-                    actualOutput: {
-                      type: "string",
-                    },
-                    source: {
-                      type: "string",
-                    },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    }));
-
-    const review = normalizeVerificationReview(
-      llmVerificationSchema.parse(JSON.parse(response.output_text.trim())),
+        imageDataUrls: input.problem.imageAssets.map((asset) => asset.dataUrl),
+        schema: llmVerificationGeminiSchema,
+        parse: (value) => llmVerificationSchema.parse(value),
+      }),
     );
 
     if (review.passed) {
       this.logger.info("testing-passed", {
         attempt: input.attempt,
-        requestId: response._request_id,
       });
 
       return {
@@ -196,7 +149,6 @@ Rules:
 
     this.logger.warn("testing-failed", {
       attempt: input.attempt,
-      requestId: response._request_id,
       failingCases: review.failingCases.length,
     });
 
@@ -277,17 +229,7 @@ export async function solveWithFunctionHarness(
     previousCandidates?: SolutionCandidate[];
   } = {},
 ): Promise<Awaited<ReturnType<SupervisorAgent["solve"]>>> {
-  const model = createPooledChatModel({
-    model: process.env.OPENAI_MODEL ?? "gpt-4.1",
-    temperature: 0,
-  });
-
-  const generators: CodeGenerationAgent[] = [
-    new DeepAgentCodeGenerationAgent(model, logger),
-  ];
-  if (process.env.GEMINI_API_KEY?.trim()) {
-    generators.push(new GeminiCodeGenerationAgent(logger));
-  }
+  const generators: CodeGenerationAgent[] = [new GeminiCodeGenerationAgent(logger)];
 
   const supervisor = new SupervisorAgent({
     generator: new MultiCodeGenerationAgent(generators, logger.child("multi-generator")),

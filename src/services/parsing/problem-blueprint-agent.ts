@@ -7,7 +7,8 @@ import {
   type RawQuestionRequest,
   type StreamedSolveRequest,
 } from "../../contracts/http.js";
-import { createOpenAIChatModel } from "../llm/openai-chat-model.js";
+import { generateGeminiJson } from "../llm/gemini-json.js";
+import { checkProviderHasKeys } from "../llm/key-pool/key-pool-factory.js";
 import type { Logger } from "../../utils/logger.js";
 import { z } from "zod";
 
@@ -83,13 +84,99 @@ const inferredHarnessSchema = z.object({
   instructions: z.array(z.string()),
 });
 
+const modelParsedProblemGeminiSchema = {
+  type: "OBJECT",
+  properties: {
+    title: { type: "STRING" },
+    normalizedStatement: { type: "STRING" },
+    targetLanguage: {
+      type: "STRING",
+      enum: ["cpp", "typescript", "javascript", "python"],
+    },
+    detectedStyle: {
+      type: "STRING",
+      enum: ["function", "stdin_stdout", "unknown"],
+    },
+    functionName: { type: "STRING" },
+    functionSignature: { type: "STRING" },
+    notes: {
+      type: "ARRAY",
+      items: { type: "STRING" },
+    },
+    extractedExamples: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          name: { type: "STRING" },
+          inputText: { type: "STRING" },
+          outputText: { type: "STRING" },
+        },
+        required: ["name", "inputText", "outputText"],
+        propertyOrdering: ["name", "inputText", "outputText"],
+      },
+    },
+  },
+  required: [
+    "title",
+    "normalizedStatement",
+    "targetLanguage",
+    "detectedStyle",
+    "functionName",
+    "functionSignature",
+    "notes",
+    "extractedExamples",
+  ],
+  propertyOrdering: [
+    "title",
+    "normalizedStatement",
+    "targetLanguage",
+    "detectedStyle",
+    "functionName",
+    "functionSignature",
+    "notes",
+    "extractedExamples",
+  ],
+} as const;
+
+const inferredHarnessGeminiSchema = {
+  type: "OBJECT",
+  properties: {
+    functionName: { type: "STRING" },
+    functionSignature: { type: "STRING" },
+    invokeExpression: { type: "STRING" },
+    assertionExpression: { type: "STRING" },
+    prelude: { type: "STRING" },
+    instructions: {
+      type: "ARRAY",
+      items: { type: "STRING" },
+    },
+  },
+  required: [
+    "functionName",
+    "functionSignature",
+    "invokeExpression",
+    "assertionExpression",
+    "prelude",
+    "instructions",
+  ],
+  propertyOrdering: [
+    "functionName",
+    "functionSignature",
+    "invokeExpression",
+    "assertionExpression",
+    "prelude",
+    "instructions",
+  ],
+} as const;
+
 export async function parseRawQuestionToBlueprint(
   request: RawQuestionRequest,
   logger: Logger,
 ): Promise<ParsedProblemBlueprint> {
   const fallback = buildRegexFallback(request, logger);
   const deterministicTemplate = buildKnownProblemTemplate(request, logger);
-  const apiKeyAvailable = Boolean(process.env.OPENAI_API_KEY);
+  const apiKeyAvailable = await checkProviderHasKeys("gemini");
 
   if (deterministicTemplate) {
     logger.info("parser-template-selected", {
@@ -100,7 +187,7 @@ export async function parseRawQuestionToBlueprint(
   }
 
   if (!apiKeyAvailable) {
-    logger.warn("parser-fallback-no-openai-key");
+    logger.warn("parser-fallback-no-gemini-key");
     const stdinSolveRequest = buildStdinStdoutSolveRequest(
       request,
       fallback,
@@ -144,20 +231,15 @@ export async function parseRawQuestionToBlueprint(
     return fallback;
   }
 
-  const model = createOpenAIChatModel({
-    model: process.env.OPENAI_MODEL ?? "gpt-4.1",
-    temperature: 0,
-  });
-
   try {
-    const runnable = model.withStructuredOutput(modelParsedProblemSchema);
-
     logger.info("parser-agent-started", {
       title: fallback.title,
       detectedStyle: fallback.detectedStyle,
     });
 
-    const result = await runnable.invoke(`
+    const extracted = await generateGeminiJson({
+      model: process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
+      prompt: `
 You convert raw coding-problem text into deterministic JSON for a later solve pipeline.
 
 Rules:
@@ -180,9 +262,27 @@ ${JSON.stringify(fallback, null, 2)}
 
 Raw question:
 ${request.question}
-    `.trim());
+      `.trim(),
+      schema: modelParsedProblemGeminiSchema,
+      parse: (value) => {
+        const payload =
+          typeof value === "object" && value !== null
+            ? (value as Record<string, unknown>)
+            : {};
 
-    const extracted = modelParsedProblemSchema.parse(result);
+        return modelParsedProblemSchema.parse({
+          ...payload,
+          functionName:
+            typeof payload.functionName === "string"
+              ? (payload.functionName.trim() || null)
+              : null,
+          functionSignature:
+            typeof payload.functionSignature === "string"
+              ? (payload.functionSignature.trim() || null)
+              : null,
+        });
+      },
+    });
     const parsed = parsedProblemBlueprintSchema.parse({
       ...extracted,
       functionName: extracted.functionName ?? undefined,
@@ -223,7 +323,6 @@ ${request.question}
     }
 
     const inferredSolveRequest = await inferSolveRequestWithModel(
-      model,
       request,
       {
         ...parsed,
@@ -288,7 +387,6 @@ ${request.question}
     });
 
     const inferredSolveRequest = await inferSolveRequestWithModel(
-      model,
       request,
       fallback,
       fallback,
@@ -358,22 +456,20 @@ ${request.question}
 }
 
 async function inferSolveRequestWithModel(
-  model: ReturnType<typeof createOpenAIChatModel>,
   request: RawQuestionRequest,
   parsed: ParsedProblemBlueprint,
   fallback: ParsedProblemBlueprint,
   logger: Logger,
 ): Promise<StreamedSolveRequest | undefined> {
   try {
-    const runnable = model.withStructuredOutput(inferredHarnessSchema);
-
     logger.info("parser-solve-request-inference-started", {
       title: parsed.title,
       extractedExamples: parsed.extractedExamples.length,
     });
 
-    const inferred = inferredHarnessSchema.parse(
-      await runnable.invoke(`
+    const inferred = await generateGeminiJson({
+      model: process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash",
+      prompt: `
 You infer the function harness metadata needed to solve a coding problem.
 
 Rules:
@@ -396,8 +492,10 @@ ${JSON.stringify(fallback, null, 2)}
 
 Raw question:
 ${request.question}
-      `.trim()),
-    );
+      `.trim(),
+      schema: inferredHarnessGeminiSchema,
+      parse: (value) => inferredHarnessSchema.parse(value),
+    });
 
     const extractedExamples =
       parsed.extractedExamples.length > 0

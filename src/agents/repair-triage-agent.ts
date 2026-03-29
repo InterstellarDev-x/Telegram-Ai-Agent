@@ -5,7 +5,7 @@ import type {
 } from "../contracts/agents.js";
 import type { StreamedSolveRequest } from "../contracts/http.js";
 import type { ProblemImageAsset } from "../contracts/problem.js";
-import { createOpenAIClient } from "../services/llm/openai-client.js";
+import { generateGeminiJson } from "../services/llm/gemini-json.js";
 import type { Logger } from "../utils/logger.js";
 import {
   compactProblemStatement,
@@ -30,6 +30,48 @@ const repairTriageSchema = z.object({
     )
     .default([]),
 });
+
+const repairTriageGeminiSchema = {
+  type: "OBJECT",
+  properties: {
+    needsRepair: { type: "BOOLEAN" },
+    evidenceSummary: { type: "STRING" },
+    rootCause: { type: "STRING" },
+    actionItems: {
+      type: "ARRAY",
+      items: { type: "STRING" },
+    },
+    failingCases: {
+      type: "ARRAY",
+      items: {
+        type: "OBJECT",
+        properties: {
+          name: { type: "STRING" },
+          input: { type: "STRING" },
+          expectedOutput: { type: "STRING" },
+          actualOutput: { type: "STRING" },
+          source: { type: "STRING" },
+        },
+        required: ["name", "input", "expectedOutput", "actualOutput", "source"],
+        propertyOrdering: ["name", "input", "expectedOutput", "actualOutput", "source"],
+      },
+    },
+  },
+  required: [
+    "needsRepair",
+    "evidenceSummary",
+    "rootCause",
+    "actionItems",
+    "failingCases",
+  ],
+  propertyOrdering: [
+    "needsRepair",
+    "evidenceSummary",
+    "rootCause",
+    "actionItems",
+    "failingCases",
+  ],
+} as const;
 
 export interface RepairTriageInput {
   request: StreamedSolveRequest;
@@ -64,35 +106,18 @@ export class RepairTriageAgent {
       feedbackImages: input.feedbackImageAssets.length,
     });
 
-    const client = createOpenAIClient();
     const prompt = buildRepairTriagePrompt(input);
     this.logger.info("repair-triage-context-compacted", {
       promptChars: estimatePromptChars(prompt),
       feedbackTexts: input.userFeedbackTexts.length,
       feedbackImages: input.feedbackImageAssets.length,
     });
-    const content: Array<
-      | { type: "input_text"; text: string }
-      | { type: "input_image"; image_url: string; detail: "high" }
-    > = [
-      {
-        type: "input_text",
-        text: prompt,
-      },
-      ...input.feedbackImageAssets.map((asset) => ({
-        type: "input_image" as const,
-        image_url: asset.dataUrl,
-        detail: "high" as const,
-      })),
-    ];
-
-    const response = await client.responses.create({
+    const parsed = await generateGeminiJson({
       model:
-        process.env.OPENAI_VISION_MODEL ??
-        process.env.OPENAI_MODEL ??
-        "gpt-4.1",
-      temperature: 0,
-      instructions: `
+        process.env.GEMINI_VISION_MODEL?.trim() ||
+        process.env.GEMINI_MODEL?.trim() ||
+        "gemini-2.5-flash",
+      prompt: `
 You are the Repair Triage Agent for a competitive-programming code solver.
 
 Your job is to analyze follow-up user evidence after code was already generated.
@@ -106,63 +131,12 @@ Rules:
 - rootCause must be concise and concrete when needsRepair=true.
 - failingCases may be empty when exact IO cannot be recovered from the evidence.
 - Return only JSON matching the schema.
+${prompt}
       `.trim(),
-      input: [
-        {
-          role: "user",
-          content,
-        },
-      ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "repair_triage",
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            required: [
-              "needsRepair",
-              "evidenceSummary",
-              "rootCause",
-              "actionItems",
-              "failingCases",
-            ],
-            properties: {
-              needsRepair: { type: "boolean" },
-              evidenceSummary: { type: "string" },
-              rootCause: { type: "string" },
-              actionItems: {
-                type: "array",
-                items: { type: "string" },
-              },
-              failingCases: {
-                type: "array",
-                items: {
-                  type: "object",
-                  additionalProperties: false,
-                  required: [
-                    "name",
-                    "input",
-                    "expectedOutput",
-                    "actualOutput",
-                    "source",
-                  ],
-                  properties: {
-                    name: { type: "string" },
-                    input: { type: "string" },
-                    expectedOutput: { type: "string" },
-                    actualOutput: { type: "string" },
-                    source: { type: "string" },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
+      imageDataUrls: input.feedbackImageAssets.map((asset) => asset.dataUrl),
+      schema: repairTriageGeminiSchema,
+      parse: (value) => repairTriageSchema.parse(value),
     });
-
-    const parsed = repairTriageSchema.parse(JSON.parse(response.output_text.trim()));
     const evidenceSummary =
       parsed.evidenceSummary.trim() ||
       (parsed.needsRepair
