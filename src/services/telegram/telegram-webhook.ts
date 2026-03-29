@@ -94,7 +94,17 @@ export async function processTelegramUpdate(
     await telegramSessionStore.startCollecting(chatId);
     await client.sendTextMessage(
       chatId,
-      "Image collection started. Send images of the coding problem now. When you are done, send 2 and I will start processing.",
+      [
+        "New problem session started.",
+        "",
+        "How to use this bot:",
+        "1. Send all screenshots/photos of the problem statement, sample tests, constraints, and any boilerplate/template code.",
+        "2. When you are done sending problem images, send 2 to start processing.",
+        "3. I will extract the problem, generate C++ code, and verify it.",
+        "4. If the code gives compile/runtime/wrong-answer errors, send error screenshots or text, then send 2 again for a repair loop.",
+        "5. Send status anytime to see what I am doing.",
+        "6. Send 4 when the problem is done, or 5 to clear everything and start over.",
+      ].join("\n"),
       { replyToMessageId: message.message_id },
     );
     return;
