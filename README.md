@@ -1,14 +1,22 @@
-# hackwithinfy
+# Telegram AI Coding Agent
 
-Scalable Bun + TypeScript backend for a Telegram-style coding solver workflow.
+A Bun + TypeScript backend that acts as a Telegram bot for solving competitive-programming and exam-style coding problems from screenshots.
 
-It includes:
+## How it works
 
-- A `SupervisorAgent` that orchestrates retries
-- A DeepAgent-backed `CodeGenerationAgent`
-- A DeepAgent-backed `CodeTestingAgent`
-- Executable verifiers for `javascript`, `typescript`, and `python`
-- A local scripted demo that proves the correction loop without calling OpenAI
+1. **Image collection** – You send one or more screenshots of a coding problem to the Telegram bot.
+2. **OCR / extraction** – The bot downloads each image and uses an OpenAI Vision or Gemini vision model to extract the problem statement, constraints, examples, and any starter template.
+3. **Problem parsing** – A parser agent converts the extracted text into a structured problem blueprint (title, statement, I/O format, sample tests, function harness).
+4. **Supervisor solve loop** – A `SupervisorAgent` orchestrates up to N attempts:
+   - A **code-generation agent** (OpenAI GPT-4 or Gemini) produces a candidate solution.
+   - A **code-testing agent** executes the candidate against hidden verifier tests (supports `cpp`, `typescript`, `javascript`, `python`).
+   - If tests fail the tester produces structured feedback (root cause, action items) and the generator retries.
+5. **Reply** – The bot sends the verified solution back to the Telegram chat as a formatted code block.
+6. **Follow-up feedback loop** – After receiving code you can send error screenshots or text notes, then trigger a re-solve with the additional context.
+
+## Supported languages
+
+`cpp` · `typescript` · `javascript` · `python`
 
 ## Install
 
@@ -16,13 +24,21 @@ It includes:
 bun install
 ```
 
-## Run the example flow
+## Run the server
+
+```bash
+bun run serve
+```
+
+The HTTP server listens on port `3000` by default.
+
+## Run the demo (no API keys required)
 
 ```bash
 bun run demo
 ```
 
-The demo intentionally generates one incorrect solution first, fails hidden verifier tests, retries, and then returns the verified code.
+The demo uses scripted (mock) agents to show the full generator → tester → retry loop without calling any LLM API.
 
 ## Run tests
 
@@ -30,42 +46,59 @@ The demo intentionally generates one incorrect solution first, fails hidden veri
 bun test
 ```
 
-## Run streaming API
+## Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `OPENAI_API_KEY` | For OpenAI features | API key for GPT-4 code generation and vision OCR |
+| `OPENAI_MODEL` | No (default `gpt-4.1`) | Chat model used for code generation |
+| `OPENAI_VISION_MODEL` | No (default `gpt-4.1`) | Vision model used for OCR / image extraction |
+| `GEMINI_API_KEY` | For Gemini features | API key for Gemini code generation |
+| `GEMINI_MODEL` | No (default `gemini-2.5-flash`) | Gemini model used for code generation |
+| `TELEGRAM_BOT_TOKEN` | For Telegram bot | Bot token from @BotFather |
+| `TELEGRAM_WEBHOOK_SECRET` | No | Optional shared secret to validate webhook calls |
+| `UPSTASH_REDIS_REST_URL` | No | Upstash Redis URL for persistent session storage |
+| `UPSTASH_REDIS_REST_TOKEN` | No | Upstash Redis token for persistent session storage |
+
+## Telegram bot setup
+
+1. Create a bot via [@BotFather](https://t.me/BotFather) and copy the token.
+2. Set `TELEGRAM_BOT_TOKEN` and other env vars.
+3. Start the server and expose it (e.g. with [ngrok](https://ngrok.com/)).
+4. Register your webhook with Telegram:
 
 ```bash
-bun run serve
+curl "https://api.telegram.org/bot<TOKEN>/setWebhook?url=https://your-host/telegram/webhook"
 ```
 
-## Telegram Bot
+### Telegram chat commands
 
-Set these environment variables before starting the server:
+| Message | Action |
+|---|---|
+| `1` | Start collecting problem images |
+| (send images) | Add screenshots to the current collection queue |
+| `2` | Stop collecting and start OCR + solve |
+| `status` | Show the current session state |
+| `4` | Mark problem as done and clear the session |
+| `5` | Reset the session without marking as done |
 
-```bash
-export OPENAI_API_KEY="your-key"
-export TELEGRAM_BOT_TOKEN="your-telegram-bot-token"
-export TELEGRAM_WEBHOOK_SECRET="optional-shared-secret"
-export OPENAI_MODEL="gpt-4.1"
-export OPENAI_VISION_MODEL="gpt-4.1"
-```
+After the bot sends a solution you can send error screenshots or explanatory text, then send `2` again to trigger a repair pass with that feedback.
 
-Then expose your local server and point Telegram at:
+## HTTP API
 
-```text
-POST /telegram/webhook
-```
+All endpoints accept and return `application/json`. The `/solve/*` endpoints stream [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events).
 
-The webhook accepts Telegram updates, downloads the largest uploaded photo, extracts the coding question from the image with OpenAI vision, converts it into the existing deterministic problem JSON, runs the supervisor generator/tester loop, and replies in the same chat with the verified code.
+### `GET /health`
 
-Telegram chat flow:
+Returns `{ ok: true, timestamp }`.
 
-- Send `1` to start collecting images.
-- Send one or more screenshots/photos of the coding problem.
-- Send `2` to stop collecting and start OCR + solving.
-- If the images are blurry or cropped, the bot asks for clearer images and stays in collection mode.
+### `GET /telegram/health`
 
-POST to `/solve/stream` with `Content-Type: application/json`. The response is Server-Sent Events and streams logs plus the final result.
+Returns the configuration status of Telegram, OpenAI, Gemini, and Upstash Redis.
 
-Example:
+### `POST /solve/stream`
+
+Solve a fully structured problem. Streams `log`, `accepted`, and `result` SSE events.
 
 ```bash
 curl -N -X POST http://localhost:3000/solve/stream \
@@ -94,35 +127,62 @@ curl -N -X POST http://localhost:3000/solve/stream \
   }'
 ```
 
-You can also send only the raw question text and let the parser agent build the structured JSON first:
+### `POST /solve/from-text/stream`
+
+Parse raw question text and solve it in one call. Streams `log`, `accepted`, `parsed_problem`, and `result` SSE events.
 
 ```bash
 curl -N -X POST http://localhost:3000/solve/from-text/stream \
   -H 'Content-Type: application/json' \
   -d '{
-    "question": "Regular Expression Matching\n\nImplement a TypeScript function:\nfunction isMatch(s: string, p: string): boolean\n\nExample 1:\nInput: s = \"aa\", p = \"a\"\nOutput: false\n\nExample 2:\nInput: s = \"aa\", p = \"a*\"\nOutput: true\n\nExample 3:\nInput: s = \"ab\", p = \".*\"\nOutput: true",
+    "question": "Regular Expression Matching\n\nImplement a TypeScript function:\nfunction isMatch(s: string, p: string): boolean\n\nExample 1:\nInput: s = \"aa\", p = \"a\"\nOutput: false",
     "targetLanguage": "typescript",
     "maxAttempts": 4
   }'
 ```
 
-If you only want the deterministic JSON blueprint without solving, call:
+### `POST /parse/problem`
+
+Parse raw question text into a structured blueprint JSON without solving it.
 
 ```bash
 curl -X POST http://localhost:3000/parse/problem \
   -H 'Content-Type: application/json' \
   -d '{
-    "question": "Regular Expression Matching\n\nImplement a TypeScript function:\nfunction isMatch(s: string, p: string): boolean\n\nExample 1:\nInput: s = \"aa\", p = \"a\"\nOutput: false"
+    "question": "Regular Expression Matching\n\nImplement a TypeScript function:\nfunction isMatch(s: string, p: string): boolean"
   }'
 ```
 
-## Use real OpenAI-backed agents
+### `POST /telegram/webhook`
 
-Set:
+Receives Telegram updates. Register this URL as your bot webhook (see setup above).
 
-```bash
-export OPENAI_API_KEY="your-key"
-export OPENAI_MODEL="gpt-4.1"
+## Project structure
+
+```
+src/
+  agents/          # Code generation and testing agent implementations
+  contracts/       # Zod schemas and TypeScript types
+  services/
+    execution/     # Code execution / verifier runners
+    llm/           # OpenAI chat model wrappers
+    parsing/       # Problem blueprint parser
+    solvers/       # High-level solve orchestration
+    storage/       # Solve artifact store (Upstash Redis)
+    streaming/     # SSE helpers
+    telegram/      # Telegram webhook, session store, bot client
+    vision/        # Image OCR / problem extraction
+  utils/           # Logger
+api/               # Vercel serverless entry point
+tests/             # Test suite
 ```
 
-Then instantiate `DeepAgentCodeGenerationAgent` and `DeepAgentCodeTestingAgent` with a model from [`src/services/llm/openai-chat-model.ts`](./src/services/llm/openai-chat-model.ts).
+## Agents
+
+| Agent | Description |
+|---|---|
+| `SupervisorAgent` | Orchestrates the generate → test → retry loop |
+| `GeminiCodeGenerationAgent` | Generates solutions via Google Gemini |
+| `DeepAgentCodeGenerationAgent` | Generates solutions via OpenAI / DeepAgents |
+| `MultiCodeGenerationAgent` | Runs multiple generation agents in parallel and picks the best candidate |
+| `DeepAgentCodeTestingAgent` | Tests candidates and produces structured feedback |

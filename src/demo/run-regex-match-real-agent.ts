@@ -10,7 +10,7 @@ import type {
 import type { CodingProblem } from "../contracts/problem.js";
 import { InMemoryAgentTransport } from "../services/agent-transport.js";
 import { BunTypeScriptExecutor } from "../services/execution/bun-executor.js";
-import { createOpenAIChatModel } from "../services/llm/openai-chat-model.js";
+import { createPooledChatModel } from "../services/llm/key-pool/pooled-chat-model.js";
 import type { Logger } from "../utils/logger.js";
 import { ConsoleLogger } from "../utils/logger.js";
 
@@ -84,7 +84,7 @@ class RegexFunctionTestingAgent implements CodeTestingAgent {
 
 export async function runRegexMatchRealAgent(): Promise<void> {
   const logger = new ConsoleLogger("regex-real-agent");
-  const model = createOpenAIChatModel({
+  const model = createPooledChatModel({
     model: process.env.OPENAI_MODEL ?? "gpt-4.1",
     temperature: 0,
   });

@@ -6,6 +6,8 @@ import {
   type RawQuestionRequest,
   type StreamedSolveRequest,
 } from "./contracts/http.js";
+import { createApiCredentialRequestSchema } from "./contracts/api-credential.js";
+import { getKeyPool, resetPoolSingletons, isPoolInitialized, checkProviderHasKeys } from "./services/llm/key-pool/key-pool-factory.js";
 
 export async function handleHttpRequest(request: Request): Promise<Response> {
   const pathname = new URL(request.url).pathname;
@@ -28,6 +30,9 @@ export async function handleHttpRequest(request: Request): Promise<Response> {
   }
 
   if (request.method === "GET" && pathname === "/telegram/health") {
+    const openAiConfigured = await checkProviderHasKeys("openai");
+    const geminiConfigured = await checkProviderHasKeys("gemini");
+
     return jsonResponse({
       ok: true,
       timestamp: new Date().toISOString(),
@@ -37,8 +42,8 @@ export async function handleHttpRequest(request: Request): Promise<Response> {
         process.env.UPSTASH_REDIS_REST_URL?.trim() &&
           process.env.UPSTASH_REDIS_REST_TOKEN?.trim(),
       ),
-      openAiConfigured: Boolean(process.env.OPENAI_API_KEY),
-      geminiConfigured: Boolean(process.env.GEMINI_API_KEY),
+      openAiConfigured,
+      geminiConfigured,
     });
   }
 
@@ -56,6 +61,18 @@ export async function handleHttpRequest(request: Request): Promise<Response> {
 
   if (request.method === "POST" && pathname === "/telegram/webhook") {
     return await handleTelegramWebhook(request);
+  }
+
+  if (request.method === "POST" && pathname === "/admin/api-keys") {
+    return await handleCreateApiCredential(request);
+  }
+
+  if (request.method === "GET" && pathname === "/pool/stats") {
+    return await handlePoolStats(request);
+  }
+
+  if (request.method === "POST" && pathname === "/pool/reset") {
+    return await handlePoolReset(request);
   }
 
   return new Response("Not Found", { status: 404 });
@@ -155,6 +172,85 @@ async function handleTelegramWebhook(request: Request): Promise<Response> {
   }
 }
 
+async function handleCreateApiCredential(request: Request): Promise<Response> {
+  const secret = process.env.API_KEY_ADMIN_SECRET?.trim();
+  if (!secret) {
+    return jsonResponse(
+      { error: "API key admin endpoint is disabled. Set API_KEY_ADMIN_SECRET." },
+      403,
+    );
+  }
+
+  const provided = request.headers.get("x-admin-secret")?.trim();
+  if (provided !== secret) {
+    return jsonResponse(
+      { error: "Invalid or missing x-admin-secret header." },
+      401,
+    );
+  }
+
+  const body = await safeReadJson(request);
+  const parsed = createApiCredentialRequestSchema.safeParse(body);
+  if (!parsed.success) {
+    return jsonResponse(
+      {
+        error: "Invalid request body",
+        details: parsed.error.flatten(),
+      },
+      400,
+    );
+  }
+
+  try {
+    const { prisma } = await import("./services/storage/prisma.js");
+    const credential = await prisma.apiCredential.create({
+      data: parsed.data,
+    });
+
+    // Invalidate the running pool instantly so next acquire reads the new keys
+    await resetPoolSingletons();
+
+    return jsonResponse(
+      {
+        ok: true,
+        credential: {
+          id: credential.id,
+          provider: credential.provider,
+          label: credential.label,
+          model: credential.model,
+          isActive: credential.isActive,
+          createdAt: credential.createdAt,
+          updatedAt: credential.updatedAt,
+          apiKeyPreview: maskApiKey(credential.apiKey),
+        },
+      },
+      201,
+    );
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "P2002"
+    ) {
+      return jsonResponse(
+        { error: "This API key already exists in the database." },
+        409,
+      );
+    }
+
+    return jsonResponse(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to create API credential.",
+      },
+      500,
+    );
+  }
+}
+
 async function runSolve(
   request: StreamedSolveRequest,
   stream: SseEventStream,
@@ -237,4 +333,90 @@ function jsonResponse(payload: unknown, status = 200): Response {
       "Access-Control-Allow-Origin": "*",
     },
   });
+}
+
+function maskApiKey(apiKey: string): string {
+  if (apiKey.length <= 8) {
+    return `${apiKey.slice(0, 2)}***`;
+  }
+
+  return `${apiKey.slice(0, 4)}...${apiKey.slice(-4)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Pool observability & admin
+// ---------------------------------------------------------------------------
+
+async function handlePoolStats(request: Request): Promise<Response> {
+  const secret = process.env.POOL_RESET_SECRET?.trim();
+  if (!secret) {
+    return jsonResponse(
+      { error: "Pool API is disabled. Set POOL_RESET_SECRET to enable it." },
+      403,
+    );
+  }
+
+  const provided = request.headers.get("x-pool-secret");
+  if (provided !== secret) {
+    return jsonResponse({ error: "Invalid or missing X-Pool-Secret header." }, 401);
+  }
+
+  const stats: Record<string, unknown> = {};
+
+  if (isPoolInitialized("openai")) {
+    try {
+      const pool = await getKeyPool("openai");
+      stats.openai = pool.getStats();
+    } catch (err) {
+      stats.openai = { error: String(err) };
+    }
+  } else {
+    stats.openai = { status: "not initialized" };
+  }
+
+  if (isPoolInitialized("gemini")) {
+    try {
+      const pool = await getKeyPool("gemini");
+      stats.gemini = pool.getStats();
+    } catch (err) {
+      stats.gemini = { error: String(err) };
+    }
+  } else {
+    stats.gemini = { status: "not initialized" };
+  }
+
+  return jsonResponse({ ok: true, timestamp: new Date().toISOString(), pools: stats });
+}
+
+async function handlePoolReset(request: Request): Promise<Response> {
+  // Require a pre-shared secret to prevent accidental or malicious resets.
+  // Set POOL_RESET_SECRET in your environment.  If not set, the endpoint is disabled.
+  const secret = process.env.POOL_RESET_SECRET?.trim();
+  if (!secret) {
+    return jsonResponse(
+      { error: "Pool reset is disabled. Set POOL_RESET_SECRET to enable it." },
+      403,
+    );
+  }
+
+  const provided = request.headers.get("x-pool-secret");
+  if (provided !== secret) {
+    return jsonResponse({ error: "Invalid or missing X-Pool-Secret header." }, 401);
+  }
+
+  if (isPoolInitialized("openai")) {
+    const pool = await getKeyPool("openai").catch(() => null);
+    pool?.resetAll();
+  }
+  
+  if (isPoolInitialized("gemini")) {
+    const pool = await getKeyPool("gemini").catch(() => null);
+    pool?.resetAll();
+  }
+
+  // Also tear down singletons so the next request rebuilds them fresh
+  // (useful after credential rotation where new env vars were injected).
+  await resetPoolSingletons();
+
+  return jsonResponse({ ok: true, message: "All pool slots reset to healthy." });
 }

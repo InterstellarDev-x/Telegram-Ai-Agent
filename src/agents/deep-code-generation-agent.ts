@@ -1,4 +1,4 @@
-import type { BaseLanguageModel } from "@langchain/core/language_models/base";
+import type { PooledChatModel } from "../services/llm/key-pool/pooled-chat-model.js";
 import {
   solutionCandidateSchema,
   type CodeGenerationAgent,
@@ -43,9 +43,9 @@ export class DeepAgentCodeGenerationAgent implements CodeGenerationAgent {
   readonly role = "code-generator" as const;
   readonly providerName = "openai" as const;
   private readonly logger: Logger;
-  private readonly model: BaseLanguageModel;
+  private readonly model: PooledChatModel;
 
-  constructor(model: BaseLanguageModel, logger: Logger) {
+  constructor(model: PooledChatModel, logger: Logger) {
     this.model = model;
     this.logger = logger.child("code-generator");
   }
@@ -66,12 +66,9 @@ export class DeepAgentCodeGenerationAgent implements CodeGenerationAgent {
       sampleCases: input.problem.sampleCases.length,
     });
     const structured = modelSolutionCandidateSchema.parse(
-      await invokeStructuredModel(
-        this.model,
-        CODE_GENERATION_SYSTEM_PROMPT,
-        prompt,
-        modelSolutionCandidateSchema,
-      ),
+      await this.model
+        .withStructuredOutput(modelSolutionCandidateSchema)
+        .invoke(`${CODE_GENERATION_SYSTEM_PROMPT.trim()}\n\n${prompt.trim()}`),
     );
 
     this.logger.info("generation-finished", {
@@ -134,25 +131,3 @@ Return structured output with:
 `;
 }
 
-type StructuredAgent = {
-  withStructuredOutput(schema: unknown): {
-    invoke(input: string): Promise<unknown>;
-  };
-};
-
-async function invokeStructuredModel(
-  model: BaseLanguageModel,
-  systemPrompt: string,
-  userPrompt: string,
-  schema: typeof modelSolutionCandidateSchema,
-): Promise<unknown> {
-  const structuredModel = model as BaseLanguageModel & StructuredAgent;
-  if (typeof structuredModel.withStructuredOutput !== "function") {
-    throw new Error("Configured model does not support structured output.");
-  }
-
-  const runnable = structuredModel.withStructuredOutput(schema);
-  return await runnable.invoke(
-    `${systemPrompt.trim()}\n\n${userPrompt.trim()}`,
-  );
-}

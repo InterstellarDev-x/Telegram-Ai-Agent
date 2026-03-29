@@ -4,6 +4,7 @@ import {
   type GenerateSolutionInput,
   type SolutionCandidate,
 } from "../contracts/agents.js";
+import { getPooledGeminiClient, GeminiHttpError } from "../services/llm/key-pool/pooled-gemini-client.js";
 import type { Logger } from "../utils/logger.js";
 import {
   compactProblemStatement,
@@ -38,17 +39,11 @@ export class GeminiCodeGenerationAgent implements CodeGenerationAgent {
   readonly role = "code-generator" as const;
   readonly providerName = "gemini" as const;
   private readonly logger: Logger;
-  private readonly apiKey: string;
   private readonly model: string;
 
   constructor(logger: Logger) {
     this.logger = logger.child("gemini-code-generator");
-    this.apiKey = process.env.GEMINI_API_KEY?.trim() ?? "";
     this.model = process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
-
-    if (!this.apiKey) {
-      throw new Error("GEMINI_API_KEY is required to use Gemini generation.");
-    }
   }
 
   async generate(input: GenerateSolutionInput): Promise<SolutionCandidate> {
@@ -72,36 +67,41 @@ export class GeminiCodeGenerationAgent implements CodeGenerationAgent {
       feedbackCount: input.feedbackHistory.length,
       sampleCases: input.problem.sampleCases.length,
     });
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${encodeURIComponent(this.apiKey)}`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              role: "user",
-              parts: [
-                {
-                  text: `${GEMINI_CODE_GENERATION_SYSTEM_PROMPT.trim()}\n\n${prompt}`,
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0,
-            response_mime_type: "application/json",
-            response_schema: solutionCandidateResponseSchema,
-          },
-        }),
-      },
-    );
+    const pooledClient = getPooledGeminiClient();
 
-    if (!response.ok) {
-      throw new Error(`Gemini generation failed with status ${response.status}.`);
-    }
+    const response = await pooledClient.withKey(async (apiKey) => {
+      const res = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${encodeURIComponent(apiKey)}`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                role: "user",
+                parts: [
+                  {
+                    text: `${GEMINI_CODE_GENERATION_SYSTEM_PROMPT.trim()}\n\n${prompt}`,
+                  },
+                ],
+              },
+            ],
+            generationConfig: {
+              temperature: 0,
+              response_mime_type: "application/json",
+              response_schema: solutionCandidateResponseSchema,
+            },
+          }),
+        },
+      );
+
+      if (!res.ok) {
+        throw new GeminiHttpError(res.status, await res.text());
+      }
+      return res;
+    });
 
     const body = (await response.json()) as GeminiGenerateContentResponse;
     const rawText = extractGeminiText(body).trim();

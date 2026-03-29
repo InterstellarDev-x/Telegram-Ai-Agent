@@ -14,8 +14,8 @@ import type {
 import type { StreamedSolveRequest } from "../../contracts/http.js";
 import { buildProblemFromHttpRequest } from "../../contracts/http.js";
 import { InMemoryAgentTransport } from "../agent-transport.js";
-import { createOpenAIChatModel } from "../llm/openai-chat-model.js";
-import { createOpenAIClient } from "../llm/openai-client.js";
+import { createPooledChatModel } from "../llm/key-pool/pooled-chat-model.js";
+import { getPooledOpenAIClient } from "../llm/key-pool/pooled-openai-client.js";
 import type { Logger } from "../../utils/logger.js";
 import {
   compactProblemStatement,
@@ -62,7 +62,7 @@ class ImageAwareCodeTestingAgent implements CodeTestingAgent {
       return deterministicGuardrailReport;
     }
 
-    const client = createOpenAIClient();
+    const pooledClient = getPooledOpenAIClient();
     const content: Array<
       | { type: "input_text"; text: string }
       | { type: "input_image"; image_url: string; detail: "high" }
@@ -78,7 +78,7 @@ class ImageAwareCodeTestingAgent implements CodeTestingAgent {
       })),
     ];
 
-    const response = await client.responses.create({
+    const response = await pooledClient.withKey((client) => client.responses.create({
       model:
         process.env.OPENAI_VISION_MODEL ??
         process.env.OPENAI_MODEL ??
@@ -175,7 +175,7 @@ Rules:
           },
         },
       },
-    });
+    }));
 
     const review = normalizeVerificationReview(
       llmVerificationSchema.parse(JSON.parse(response.output_text.trim())),
@@ -277,7 +277,7 @@ export async function solveWithFunctionHarness(
     previousCandidates?: SolutionCandidate[];
   } = {},
 ): Promise<Awaited<ReturnType<SupervisorAgent["solve"]>>> {
-  const model = createOpenAIChatModel({
+  const model = createPooledChatModel({
     model: process.env.OPENAI_MODEL ?? "gpt-4.1",
     temperature: 0,
   });
