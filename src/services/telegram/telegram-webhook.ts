@@ -7,6 +7,10 @@ import {
 } from "../../contracts/telegram.js";
 import { solveRawQuestion } from "../solvers/raw-question-solver.js";
 import {
+  solveWithFunctionHarness,
+  verifyCandidateWithFunctionHarness,
+} from "../solvers/function-harness-solver.js";
+import {
   ProblemImageExtractor,
   type ProblemImageExtractionResult,
 } from "../vision/problem-image-extractor.js";
@@ -19,6 +23,7 @@ import {
 } from "./telegram-bot-client.js";
 import {
   telegramSessionStore,
+  type TelegramChatSession,
   type PendingTelegramImage,
 } from "./telegram-session-store.js";
 
@@ -56,6 +61,35 @@ export async function processTelegramUpdate(
   const text = message.text?.trim();
   const session = await telegramSessionStore.get(chatId);
 
+  if (text === "5") {
+    await telegramSessionStore.reset(chatId);
+    await client.sendTextMessage(
+      chatId,
+      "Cleared the current session. Send 1 to start a new problem.",
+      { replyToMessageId: message.message_id },
+    );
+    return;
+  }
+
+  if (text === "4") {
+    await telegramSessionStore.reset(chatId);
+    await client.sendTextMessage(
+      chatId,
+      "Marked the current problem as done and cleared the session.",
+      { replyToMessageId: message.message_id },
+    );
+    return;
+  }
+
+  if (text?.toLowerCase() === "status") {
+    await client.sendTextMessage(
+      chatId,
+      buildStatusMessage(session),
+      { replyToMessageId: message.message_id },
+    );
+    return;
+  }
+
   if (text === "1") {
     await telegramSessionStore.startCollecting(chatId);
     await client.sendTextMessage(
@@ -77,6 +111,24 @@ export async function processTelegramUpdate(
     }
 
     if (session.images.length === 0) {
+      if (session.mode === "awaiting_feedback" && session.followUp) {
+        const hasFeedback =
+          session.followUp.feedbackImages.length > 0 ||
+          session.followUp.feedbackTexts.length > 0;
+        if (!hasFeedback) {
+          await client.sendTextMessage(
+            chatId,
+            "No follow-up feedback is queued. Send error screenshots or text first, then send 2 to re-check the current code. Send 4 to finish or 5 to reset.",
+            { replyToMessageId: message.message_id },
+          );
+          return;
+        }
+
+        await telegramSessionStore.startProcessing(chatId);
+        await processFollowUpFeedback(update, message, client, logger);
+        return;
+      }
+
       await client.sendTextMessage(
         chatId,
         "No images are queued. Send 1 to start, upload your problem images, then send 2.",
@@ -92,6 +144,17 @@ export async function processTelegramUpdate(
 
   const pendingImage = buildPendingImage(message);
   if (pendingImage) {
+    if (session.mode === "awaiting_feedback") {
+      const updated = await telegramSessionStore.addImage(chatId, pendingImage);
+      const feedbackCount = updated.followUp?.feedbackImages.length ?? 0;
+      await client.sendTextMessage(
+        chatId,
+        `Feedback image ${feedbackCount} saved. Send more details, or send 2 to re-check the current code.`,
+        { replyToMessageId: message.message_id },
+      );
+      return;
+    }
+
     if (session.mode !== "collecting") {
       await client.sendTextMessage(
         chatId,
@@ -119,10 +182,20 @@ export async function processTelegramUpdate(
     return;
   }
 
+  if (session.mode === "awaiting_feedback" && text) {
+    await telegramSessionStore.addFeedbackText(chatId, text);
+    await client.sendTextMessage(
+      chatId,
+      "Feedback note saved. Send more screenshots/text, or send 2 to re-check the current code. Send 4 to finish or 5 to reset.",
+      { replyToMessageId: message.message_id },
+    );
+    return;
+  }
+
   if (text) {
     await client.sendTextMessage(
       chatId,
-      "Send 1 to start collecting problem images. Then send images. After uploading them, send 2 and I will extract, solve, and verify the code.",
+      "Send 1 to start collecting problem images. Then send images. After uploading them, send 2 and I will extract, solve, and verify the code. After I send code, you can send error screenshots/text and then send 2 again for a repair loop. Send status anytime.",
       { replyToMessageId: message.message_id },
     );
     return;
@@ -144,7 +217,14 @@ async function processCollectedImages(
   const chatId = message.chat.id;
   const session = await telegramSessionStore.get(chatId);
   const artifactId = crypto.randomUUID();
-  const workflow = createTelegramWorkflowMessenger(client, chatId, message.message_id);
+  const workflow = createTelegramWorkflowMessenger(
+    client,
+    chatId,
+    message.message_id,
+    (detail) => {
+      void telegramSessionStore.updateStatus(chatId, "processing", detail);
+    },
+  );
   const workflowLogger = new CallbackLogger("telegram-workflow", (entry) => {
     console.log(JSON.stringify(entry));
     workflow.onLog(entry);
@@ -224,7 +304,25 @@ async function processCollectedImages(
       undefined,
       message.message_id,
     );
-    await telegramSessionStore.reset(chatId);
+    if (outcome.result.finalCandidate) {
+      await telegramSessionStore.setAwaitingFeedback(chatId, {
+        rawQuestionRequest,
+        solveRequest: outcome.solveRequest,
+        blueprint: outcome.blueprint,
+        currentCandidate: outcome.result.finalCandidate,
+        currentReport: outcome.result.finalReport,
+        feedbackImages: [],
+        feedbackTexts: [],
+        feedbackHistory: [],
+        previousCandidates: [outcome.result.finalCandidate],
+        iterations: 0,
+      });
+      await client.sendTextMessage(
+        chatId,
+        "If this code gives compile/runtime/wrong-answer errors, send error screenshots or text and then send 2 to re-check it. Send 4 when the problem is fully done, 5 to clear everything, or status to see what the agent is doing.",
+        { replyToMessageId: message.message_id },
+      );
+    }
   } catch (error) {
     logger.error("telegram-update-failed", {
       updateId: update.update_id,
@@ -248,6 +346,140 @@ async function processCollectedImages(
     }
 
     await telegramSessionStore.reset(chatId);
+    await client.sendTextMessage(chatId, buildFailureMessage(error), {
+      replyToMessageId: message.message_id,
+    });
+  }
+}
+
+async function processFollowUpFeedback(
+  update: TelegramUpdate,
+  message: TelegramMessage,
+  client: TelegramBotClient,
+  logger: Logger,
+): Promise<void> {
+  const chatId = message.chat.id;
+  const session = await telegramSessionStore.get(chatId);
+  const followUp = session.followUp;
+  if (!followUp) {
+    await telegramSessionStore.reset(chatId);
+    throw new Error("No persisted problem context was available for feedback review.");
+  }
+
+  const workflow = createTelegramWorkflowMessenger(
+    client,
+    chatId,
+    message.message_id,
+    (detail) => {
+      void telegramSessionStore.updateStatus(chatId, "processing", detail);
+    },
+  );
+  const workflowLogger = new CallbackLogger("telegram-followup", (entry) => {
+    console.log(JSON.stringify(entry));
+    workflow.onLog(entry);
+  });
+
+  try {
+    await workflow.send("Reviewing your feedback against the last generated code.");
+    const followUpRequest = await buildFollowUpSolveRequest(
+      followUp,
+      workflowLogger.child("followup-ingress"),
+      client,
+    );
+
+    const report = await verifyCandidateWithFunctionHarness(
+      followUpRequest,
+      followUp.currentCandidate,
+      workflowLogger.child("followup-tester"),
+    );
+
+    if (report.status === "passed") {
+      await telegramSessionStore.clearFollowUpFeedback(chatId);
+      await telegramSessionStore.updateStatus(
+        chatId,
+        "awaiting_feedback",
+        "Current code still appears valid. Waiting for more feedback, 4 to finish, or 5 to reset.",
+      );
+      await client.sendTextMessage(
+        chatId,
+        "I reviewed the new feedback. The current code still appears valid from the evidence provided. Send more precise error screenshots/text, send 4 if accepted, or send 5 to reset.",
+        { replyToMessageId: message.message_id },
+      );
+      return;
+    }
+
+    await workflow.send(
+      "The new feedback indicates the current code needs changes. Regenerating a revised solution now.",
+    );
+
+    const seededFeedbackHistory = report.feedback
+      ? [...followUp.feedbackHistory, report.feedback]
+      : [...followUp.feedbackHistory];
+    const seededPreviousCandidates = [
+      ...followUp.previousCandidates,
+      followUp.currentCandidate,
+    ];
+
+    const result = await solveWithFunctionHarness(
+      {
+        ...followUpRequest,
+        maxAttempts: 3,
+      },
+      workflowLogger.child("followup-solver"),
+      {
+        feedbackHistory: seededFeedbackHistory,
+        previousCandidates: seededPreviousCandidates,
+      },
+    );
+
+    if (result.status !== "passed" || !result.finalCandidate) {
+      await telegramSessionStore.clearFollowUpFeedback(chatId);
+      await telegramSessionStore.updateStatus(
+        chatId,
+        "awaiting_feedback",
+        "Repair attempts finished without a verified replacement. Waiting for more feedback or reset.",
+      );
+      await client.sendTextMessage(
+        chatId,
+        "I could not verify a repaired solution from this feedback yet. Send more precise error screenshots/text, or send 5 to reset.",
+        { replyToMessageId: message.message_id },
+      );
+      return;
+    }
+
+    await client.sendTextMessage(
+      chatId,
+      `Verified revised solution for ${followUp.blueprint.title} in ${result.attemptsUsed} repair attempt(s).`,
+      { replyToMessageId: message.message_id },
+    );
+    await client.sendCodeMessage(
+      chatId,
+      result.finalCandidate.code,
+      result.finalCandidate.language,
+      undefined,
+      message.message_id,
+    );
+    await telegramSessionStore.updateFollowUpAfterRepair(chatId, {
+      solveRequest: followUpRequest,
+      currentCandidate: result.finalCandidate,
+      currentReport: result.finalReport,
+      feedbackImages: [],
+      feedbackTexts: [],
+      feedbackHistory: seededFeedbackHistory,
+      previousCandidates: [...seededPreviousCandidates, result.finalCandidate],
+      iterations: followUp.iterations + 1,
+    });
+  } catch (error) {
+    logger.error("telegram-followup-failed", {
+      updateId: update.update_id,
+      reason: error instanceof Error ? error.message : "unknown-error",
+      chatId,
+    });
+    await telegramSessionStore.updateStatus(
+      chatId,
+      "awaiting_feedback",
+      "Feedback processing failed. Waiting for more feedback or reset.",
+    );
     await client.sendTextMessage(chatId, buildFailureMessage(error), {
       replyToMessageId: message.message_id,
     });
@@ -345,6 +577,67 @@ async function buildRawQuestionRequestFromImages(
     warnings,
     segmentKinds: extractedSegments.map((segment) => segment.imageKind),
   };
+}
+
+async function buildFollowUpSolveRequest(
+  followUp: NonNullable<TelegramChatSession["followUp"]>,
+  logger: Logger,
+  client: TelegramBotClient,
+): Promise<import("../../contracts/http.js").StreamedSolveRequest> {
+  const feedbackImageAssets: ProblemImageAsset[] = [];
+
+  for (const [index, image] of followUp.feedbackImages.entries()) {
+    logger.info("telegram-feedback-image-processing-progress", {
+      index: index + 1,
+      total: followUp.feedbackImages.length,
+    });
+    const file = await client.getFile(image.fileId);
+    const imageBytes = await client.downloadFile(file.file_path ?? "");
+    const mimeType = inferImageMimeType(file.file_path, image.mimeType);
+    feedbackImageAssets.push({
+      mimeType,
+      dataUrl: buildDataUrl(imageBytes, mimeType),
+      caption: image.caption,
+    });
+  }
+
+  const feedbackTextBlock =
+    followUp.feedbackTexts.length === 0
+      ? ""
+      : `\n\nUser feedback after trying the previous code:\n${followUp.feedbackTexts
+          .map((text) => `- ${text}`)
+          .join("\n")}`;
+
+  return {
+    ...followUp.solveRequest,
+    imageAssets: [...followUp.solveRequest.imageAssets, ...feedbackImageAssets],
+    extractionWarnings: [
+      ...followUp.rawQuestionRequest.extractionWarnings,
+      ...followUp.feedbackTexts.map((text) => `User feedback: ${text}`),
+    ],
+    instructions: [
+      ...followUp.solveRequest.instructions,
+      "Treat the new screenshots/text as post-submission error evidence for the previous code.",
+      "If the evidence shows the previous code is wrong, fix it and produce a revised solution.",
+    ],
+    statement: `${followUp.solveRequest.statement}${feedbackTextBlock}`.trim(),
+  };
+}
+
+function buildStatusMessage(session: Awaited<ReturnType<typeof telegramSessionStore.get>>): string {
+  if (session.mode === "collecting") {
+    return `Status: collecting problem images.\nQueued images: ${session.images.length}\n${session.status.detail}`;
+  }
+
+  if (session.mode === "processing") {
+    return `Status: processing.\n${session.status.detail}`;
+  }
+
+  if (session.mode === "awaiting_feedback" && session.followUp) {
+    return `Status: waiting for follow-up feedback on ${session.followUp.blueprint.title}.\nFeedback images queued: ${session.followUp.feedbackImages.length}\nFeedback notes queued: ${session.followUp.feedbackTexts.length}\nRepair iterations: ${session.followUp.iterations}\n${session.status.detail}`;
+  }
+
+  return "Status: idle. Send 1 to start a new problem session.";
 }
 
 function verifyTelegramWebhookSecret(request: Request): void {
@@ -489,6 +782,7 @@ function createTelegramWorkflowMessenger(
   client: TelegramBotClient,
   chatId: number,
   replyToMessageId: number,
+  onStatusUpdate?: (detail: string) => void,
 ): {
   send(text: string): Promise<void>;
   onLog(entry: LogEntry): void;
@@ -497,6 +791,7 @@ function createTelegramWorkflowMessenger(
   const seen = new Set<string>();
 
   const enqueue = (text: string): Promise<void> => {
+    onStatusUpdate?.(text);
     queue = queue
       .then(() =>
         client.sendTextMessage(chatId, text, {

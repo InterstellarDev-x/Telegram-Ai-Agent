@@ -1,7 +1,9 @@
 import type {
   CodeGenerationAgent,
+  GenerationFeedback,
   CodeTestingAgent,
   GenerateSolutionInput,
+  SolutionCandidate,
   SupervisorRunResult,
 } from "../contracts/agents.js";
 import { supervisorRunResultSchema } from "../contracts/agents.js";
@@ -16,6 +18,11 @@ interface SupervisorAgentOptions {
   logger: Logger;
 }
 
+interface SupervisorSolveSeed {
+  feedbackHistory?: GenerationFeedback[];
+  previousCandidates?: SolutionCandidate[];
+}
+
 export class SupervisorAgent {
   private readonly logger: Logger;
 
@@ -23,10 +30,17 @@ export class SupervisorAgent {
     this.logger = options.logger.child("supervisor");
   }
 
-  async solve(request: SolveProblemRequest): Promise<SupervisorRunResult> {
+  async solve(
+    request: SolveProblemRequest,
+    seed: SupervisorSolveSeed = {},
+  ): Promise<SupervisorRunResult> {
     const correlationId = crypto.randomUUID();
-    const feedbackHistory: GenerateSolutionInput["feedbackHistory"] = [];
-    const previousCandidates: GenerateSolutionInput["previousCandidates"] = [];
+    const feedbackHistory: GenerateSolutionInput["feedbackHistory"] = [
+      ...(seed.feedbackHistory ?? []),
+    ];
+    const previousCandidates: GenerateSolutionInput["previousCandidates"] = [
+      ...(seed.previousCandidates ?? []),
+    ];
     let finalCandidate = undefined;
     let finalReport = undefined;
 

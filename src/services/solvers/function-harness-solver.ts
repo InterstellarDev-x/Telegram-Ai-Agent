@@ -7,6 +7,7 @@ import type {
   CodeGenerationAgent,
   CodeTestingAgent,
   GenerationFeedback,
+  SolutionCandidate,
   TestSolutionInput,
   TestingReport,
 } from "../../contracts/agents.js";
@@ -266,6 +267,10 @@ function defaultRootCause(passed: boolean, verdict: string): string {
 export async function solveWithFunctionHarness(
   request: StreamedSolveRequest,
   logger: Logger,
+  seed: {
+    feedbackHistory?: GenerationFeedback[];
+    previousCandidates?: SolutionCandidate[];
+  } = {},
 ): Promise<Awaited<ReturnType<SupervisorAgent["solve"]>>> {
   const model = createOpenAIChatModel({
     model: process.env.OPENAI_MODEL ?? "gpt-4.1",
@@ -289,6 +294,19 @@ export async function solveWithFunctionHarness(
   return await supervisor.solve({
     problem: buildProblemFromHttpRequest(request),
     maxAttempts: request.maxAttempts,
+  }, seed);
+}
+
+export async function verifyCandidateWithFunctionHarness(
+  request: StreamedSolveRequest,
+  candidate: SolutionCandidate,
+  logger: Logger,
+): Promise<TestingReport> {
+  const tester = new ImageAwareCodeTestingAgent(logger.child("image-aware-tester"));
+  return await tester.test({
+    problem: buildProblemFromHttpRequest(request),
+    attempt: 1,
+    candidate,
   });
 }
 
