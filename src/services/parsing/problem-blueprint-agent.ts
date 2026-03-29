@@ -145,6 +145,8 @@ Rules:
 - The screenshots may include separate boilerplate/template images or a split-screen editor view.
 - Preserve any visible starter code, predefined class/function signatures, and required method names in normalizedStatement.
 - Ignore UI chrome, line numbers, tabs, and editor furniture unless they are part of the required code template.
+- Treat constraints as first-class information. For hard competitive-programming problems, missing or misreading a bound can invalidate the intended algorithm.
+- Preserve enough normalized detail for downstream agents to infer advanced techniques like DP optimization, graphs, shortest paths, matching, greedy proofs, binary search on answer, prefix/suffix structures, bitmasking, and math/combinatorics.
 - Prefer detectedStyle = "stdin_stdout" unless the problem clearly requires a fixed callable signature.
 - If you are not confident enough to build a valid solve request, leave suggestedSolveRequest undefined.
 - When you can infer a function-style problem, build suggestedSolveRequest compatible with the solver API.

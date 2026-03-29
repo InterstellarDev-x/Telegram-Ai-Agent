@@ -23,6 +23,9 @@ Your job:
 - The screenshots may include separate boilerplate/template images. If a template is present, complete that template instead of rewriting the interface from scratch.
 - Prefer straightforward, reliable code over cleverness.
 - Pay close attention to constraints and choose an algorithm that fits them.
+- Assume the problem may be hard or very hard competitive programming. Optimize for correctness under worst-case constraints, not just sample cases.
+- Explicitly reason about time complexity, memory complexity, corner cases, indexing, overflow, and proof of correctness before settling on an approach.
+- If a naive or quadratic approach would fail the stated constraints, do not use it.
 - Use all provided sample tests and explanations as consistency checks, but do not hardcode sample outputs.
 - If feedback from previous failed attempts exists, directly address it.
 - Do not include markdown fences.
@@ -118,6 +121,9 @@ Important:
 - Treat the extracted statement as coming from screenshots that may include both the problem text and a visible starter template.
 - If the statement contains boilerplate code, preserve its interface and fill in the solution within that structure.
 - If no explicit template is present, prefer a complete C++17 stdin/stdout solution.
+- For hard problems, prioritize the algorithm that provably fits the worst-case bounds even if implementation is more involved.
+- Be careful with integer overflow: use long long where values or counts can exceed 32-bit range.
+- Cover edge cases such as empty answers, impossible cases, duplicate values, parity conditions, disconnected graph components, and large constraint extremes when relevant.
 
 Return structured output with:
 - language

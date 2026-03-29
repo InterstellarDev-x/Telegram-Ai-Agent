@@ -80,6 +80,7 @@ Rules:
 - These problems are typically exam-style stdin/stdout tasks and may include starter code, predefined functions, or class signatures in the screenshots.
 - Some images may primarily show the boilerplate template or code editor rather than the statement text.
 - When boilerplate is visible, verify that the candidate preserves the required interface and fits naturally into that template.
+- These may be hard competitive-programming problems, so reject solutions whose algorithmic complexity is inconsistent with the visible constraints even if the sample cases look fine.
 - Review the candidate code logically. You do not need to execute it.
 - Be conservative: mark passed=true only if the code clearly solves the shown problem.
 - If the code is wrong, incomplete, or mismatched to the screenshots, mark passed=false.
