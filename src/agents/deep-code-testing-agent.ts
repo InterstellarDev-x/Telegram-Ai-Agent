@@ -1,5 +1,4 @@
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
-import { providerStrategy } from "langchain";
 import {
   generationFeedbackSchema,
   testingPlanSchema,
@@ -53,8 +52,6 @@ export class DeepAgentCodeTestingAgent implements CodeTestingAgent {
   private readonly executionTimeoutMs: number;
   private readonly useModelPlanning: boolean;
   private readonly useModelFeedback: boolean;
-  private planAgentPromise?: Promise<StructuredAgent>;
-  private feedbackAgentPromise?: Promise<StructuredAgent>;
 
   constructor(options: DeepAgentCodeTestingAgentOptions) {
     this.logger = options.logger.child("code-tester");
@@ -126,12 +123,11 @@ export class DeepAgentCodeTestingAgent implements CodeTestingAgent {
     }
 
     try {
-      const planAgent = await this.getPlanAgent();
-      const result = await planAgent.invoke({
-        messages: [
-          {
-            role: "user",
-            content: `
+      const llmPlan = testingPlanSchema.parse(
+        await invokeStructuredModel(
+          this.model,
+          TEST_PLAN_PROMPT,
+          `
 Problem statement:
 ${input.problem.statement}
 
@@ -139,13 +135,9 @@ Known baseline tests:
 ${JSON.stringify(baselineCases, null, 2)}
 
 Return a structured testing plan.
-            `.trim(),
-          },
-        ],
-      });
-
-      const llmPlan = testingPlanSchema.parse(
-        (result as { structuredResponse?: unknown }).structuredResponse,
+          `.trim(),
+          testingPlanSchema,
+        ),
       );
       return {
         ...llmPlan,
@@ -228,12 +220,11 @@ Return a structured testing plan.
     }
 
     try {
-      const feedbackAgent = await this.getFeedbackAgent();
-      const result = await feedbackAgent.invoke({
-        messages: [
-          {
-            role: "user",
-            content: `
+      return generationFeedbackSchema.parse(
+        await invokeStructuredModel(
+          this.model,
+          FEEDBACK_PROMPT,
+          `
 Problem statement:
 ${input.problem.statement}
 
@@ -247,13 +238,9 @@ Failing executions:
 ${JSON.stringify(failures, null, 2)}
 
 Return structured correction feedback.
-            `.trim(),
-          },
-        ],
-      });
-
-      return generationFeedbackSchema.parse(
-        (result as { structuredResponse?: unknown }).structuredResponse,
+          `.trim(),
+          generationFeedbackSchema,
+        ),
       );
     } catch (error) {
       this.logger.warn("testing-feedback-fallback", {
@@ -279,34 +266,6 @@ Return structured correction feedback.
       };
     }
   }
-
-  private async getPlanAgent(): Promise<StructuredAgent> {
-    if (!this.model) {
-      throw new Error("Model-backed planning requires a configured model.");
-    }
-
-    this.planAgentPromise ??= createStructuredDeepAgent(
-      this.model,
-      TEST_PLAN_PROMPT,
-      testingPlanSchema,
-    );
-
-    return await this.planAgentPromise;
-  }
-
-  private async getFeedbackAgent(): Promise<StructuredAgent> {
-    if (!this.model) {
-      throw new Error("Model-backed feedback requires a configured model.");
-    }
-
-    this.feedbackAgentPromise ??= createStructuredDeepAgent(
-      this.model,
-      FEEDBACK_PROMPT,
-      generationFeedbackSchema,
-    );
-
-    return await this.feedbackAgentPromise;
-  }
 }
 
 function dedupeCases(cases: ProblemTestCase[]): ProblemTestCase[] {
@@ -330,23 +289,26 @@ function appendTrailingNewline(value: string): string {
 }
 
 type StructuredAgent = {
-  invoke(input: {
-    messages: Array<{ role: string; content: string }>;
-  }): Promise<{ structuredResponse?: unknown }>;
+  withStructuredOutput(schema: unknown): {
+    invoke(input: string): Promise<unknown>;
+  };
 };
 
-async function createStructuredDeepAgent(
+async function invokeStructuredModel(
   model: BaseLanguageModel,
   systemPrompt: string,
+  userPrompt: string,
   schema:
     | typeof testingPlanSchema
     | typeof generationFeedbackSchema,
-): Promise<StructuredAgent> {
-  const { createDeepAgent } = await import("deepagents");
+): Promise<unknown> {
+  const structuredModel = model as BaseLanguageModel & StructuredAgent;
+  if (typeof structuredModel.withStructuredOutput !== "function") {
+    throw new Error("Configured model does not support structured output.");
+  }
 
-  return createDeepAgent({
-    model,
-    systemPrompt,
-    responseFormat: providerStrategy(schema),
-  }) as StructuredAgent;
+  const runnable = structuredModel.withStructuredOutput(schema);
+  return await runnable.invoke(
+    `${systemPrompt.trim()}\n\n${userPrompt.trim()}`,
+  );
 }

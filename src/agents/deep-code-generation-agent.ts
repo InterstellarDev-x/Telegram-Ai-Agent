@@ -1,5 +1,4 @@
 import type { BaseLanguageModel } from "@langchain/core/language_models/base";
-import { providerStrategy } from "langchain";
 import {
   solutionCandidateSchema,
   type CodeGenerationAgent,
@@ -24,7 +23,6 @@ export class DeepAgentCodeGenerationAgent implements CodeGenerationAgent {
   readonly role = "code-generator" as const;
   private readonly logger: Logger;
   private readonly model: BaseLanguageModel;
-  private agentPromise?: Promise<StructuredAgent>;
 
   constructor(model: BaseLanguageModel, logger: Logger) {
     this.model = model;
@@ -39,13 +37,13 @@ export class DeepAgentCodeGenerationAgent implements CodeGenerationAgent {
     });
 
     const prompt = buildGenerationPrompt(input);
-    const agent = await this.getAgent();
-    const result = await agent.invoke({
-      messages: [{ role: "user", content: prompt }],
-    });
-
     const structured = solutionCandidateSchema.parse(
-      (result as { structuredResponse?: unknown }).structuredResponse,
+      await invokeStructuredModel(
+        this.model,
+        CODE_GENERATION_SYSTEM_PROMPT,
+        prompt,
+        solutionCandidateSchema,
+      ),
     );
 
     this.logger.info("generation-finished", {
@@ -54,16 +52,6 @@ export class DeepAgentCodeGenerationAgent implements CodeGenerationAgent {
     });
 
     return structured;
-  }
-
-  private async getAgent(): Promise<StructuredAgent> {
-    this.agentPromise ??= createStructuredDeepAgent(
-      this.model,
-      CODE_GENERATION_SYSTEM_PROMPT,
-      solutionCandidateSchema,
-    );
-
-    return await this.agentPromise;
   }
 }
 
@@ -107,21 +95,24 @@ Return structured output with:
 }
 
 type StructuredAgent = {
-  invoke(input: {
-    messages: Array<{ role: string; content: string }>;
-  }): Promise<{ structuredResponse?: unknown }>;
+  withStructuredOutput(schema: unknown): {
+    invoke(input: string): Promise<unknown>;
+  };
 };
 
-async function createStructuredDeepAgent(
+async function invokeStructuredModel(
   model: BaseLanguageModel,
   systemPrompt: string,
+  userPrompt: string,
   schema: typeof solutionCandidateSchema,
-): Promise<StructuredAgent> {
-  const { createDeepAgent } = await import("deepagents");
+): Promise<unknown> {
+  const structuredModel = model as BaseLanguageModel & StructuredAgent;
+  if (typeof structuredModel.withStructuredOutput !== "function") {
+    throw new Error("Configured model does not support structured output.");
+  }
 
-  return createDeepAgent({
-    model,
-    systemPrompt,
-    responseFormat: providerStrategy(schema),
-  }) as StructuredAgent;
+  const runnable = structuredModel.withStructuredOutput(schema);
+  return await runnable.invoke(
+    `${systemPrompt.trim()}\n\n${userPrompt.trim()}`,
+  );
 }
